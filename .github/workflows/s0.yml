@@ -1,0 +1,39 @@
+name: S0 schema conformance
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  schema-and-nix:
+    name: Rust conformance and locked Nix showcase (no boot)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install pinned Nix
+        uses: nixbuild/nix-quick-install-action@2c9db80fb984ceb1bcaa77cdda3fdf8cfba92035 # v34
+        with:
+          nix_version: "2.29.2"
+          enable_kvm: false
+          nix_conf: |
+            experimental-features = nix-command flakes
+            accept-flake-config = false
+      - name: Rust conformance with the locked development toolchain
+        run: |
+          nix develop --no-update-lock-file --no-write-lock-file "path:$PWD" \
+            --command cargo test --workspace --locked --target-dir "$RUNNER_TEMP/misaos-target"
+      - name: Check Nix-produced schema fixtures
+        run: |
+          nix flake check --no-update-lock-file --no-write-lock-file "path:$PWD"
+      - name: Run the S0 showcase without a VM
+        run: |
+          tool=$(nix build --no-update-lock-file --no-write-lock-file \
+            --no-link --print-out-paths "path:$PWD#default")
+          nix develop --no-update-lock-file --no-write-lock-file "path:$PWD" \
+            --command env MISA_PLAN_BIN="$tool/bin/misa-plan" tests/vm/s0.sh

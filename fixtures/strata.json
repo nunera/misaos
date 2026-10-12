@@ -1,0 +1,116 @@
+{
+  "annotations": {
+    "fixture-hash-method": "Artifact digests are SHA-256 of ASCII misa-s0-synthetic-not-artifact: plus a stable label. Record digests hash restricted ASCII JCS bytes.",
+    "fixture-provenance": "Synthetic S0 schema-only data. No OCI image, Nix closure, signing authority, boot artifact, or executable is provided or verified."
+  },
+  "exports": [
+    {
+      "argv": [
+        "printf",
+        "hello from synthetic Debian fixture\\n"
+      ],
+      "env": {
+        "LANG": "C.UTF-8"
+      },
+      "grants": [
+        "workspace"
+      ],
+      "id": "debian-hello",
+      "name": "debian-hello",
+      "program": "/usr/bin/printf",
+      "root": "sha256:22e71dae9d9ab166e3d1ca59c285b9c685ee11c367f911d7669b84fbc2dfc27c"
+    }
+  ],
+  "foreignStorage": {
+    "mode": "retain-all"
+  },
+  "hostGrants": [
+    {
+      "id": "workspace",
+      "kind": "directory",
+      "source": "/home/operator/workspace",
+      "target": "/workspace",
+      "writable": true
+    }
+  ],
+  "hostId": "synthetic-workstation",
+  "inputs": {
+    "flakeLockDigest": "sha256:41bff42e22778c20bb708ce0819065b0b45e8f37e6f0aaa0bec44de5f660b525",
+    "flakeSourceDigest": "sha256:e3ae043e1448a360e27cdea6efa1034b41764de9131750851f19e42a9033ab48",
+    "foreignLockDigest": "sha256:ae881ac1ff4a729b11e2a41e2afcda21e14d1659b98962ab0dcf49e72931cf2a",
+    "misaLibraryDigest": "sha256:cdbf9c8afd6e01d58d6270985961301ec2c4ed6f87df7be3ed1f6ba48da1e930"
+  },
+  "requiredFeatures": [],
+  "roots": [
+    {
+      "composeReceiptDigest": "sha256:d29b91e894569d19035a4f8f426c993b21f8964ce5524e7ba294e682857be90f",
+      "digest": "sha256:22e71dae9d9ab166e3d1ca59c285b9c685ee11c367f911d7669b84fbc2dfc27c",
+      "libcFamily": "glibc",
+      "name": "debian",
+      "platform": "linux/amd64",
+      "qualification": "R1",
+      "sealedPath": {
+        "kind": "oci",
+        "layout": "/var/lib/misa/synthetic/oci/debian",
+        "manifest": "sha256:22e71dae9d9ab166e3d1ca59c285b9c685ee11c367f911d7669b84fbc2dfc27c"
+      },
+      "sourceLockKey": "debian"
+    }
+  ],
+  "schemaVersion": "misa.strata/v1",
+  "trust": {
+    "approvers": {
+      "keys": [],
+      "mode": "interactive",
+      "threshold": 0
+    },
+    "channel": {
+      "rootDigest": "sha256:49fd152640a5c78c79863f6facdb0a9401e4822e9445bc3da5e8b49d832481aa",
+      "rootVersion": 1,
+      "thresholds": {
+        "root": 1,
+        "snapshot": 1,
+        "targets": 1,
+        "timestamp": 1
+      }
+    },
+    "epoch": 1,
+    "imagePublishers": {
+      "debian": [
+        {
+          "alg": "ed25519",
+          "keyId": "synthetic-review",
+          "status": "active",
+          "validFrom": 1704067200,
+          "validUntil": 1893456000
+        }
+      ]
+    },
+    "nixSubstituters": [
+      {
+        "publicKeys": [
+          {
+            "alg": "ed25519",
+            "keyId": "synthetic-review",
+            "publicKey": "38keZD7T9g3b0kkvk51jqef4olMcJ1BHnf19ocucnrI="
+          }
+        ],
+        "requireSigs": true,
+        "url": "https://cache.example.invalid/misa"
+      }
+    ],
+    "repoKeys": {
+      "apt:debian": [
+        {
+          "alg": "ed25519",
+          "keyId": "synthetic-review",
+          "publicKey": "38keZD7T9g3b0kkvk51jqef4olMcJ1BHnf19ocucnrI="
+        }
+      ]
+    },
+    "time": {
+      "floorEpoch": 1767225600,
+      "source": "rtc+bounded-ntp"
+    }
+  }
+}

@@ -1,0 +1,319 @@
+{
+  "annotations": {
+    "fixture-hash-method": "Artifact digests are SHA-256 of ASCII misa-s0-synthetic-not-artifact: plus a stable label. Record digests hash restricted ASCII JCS bytes.",
+    "fixture-provenance": "Synthetic S0 schema-only data. No OCI image, Nix closure, signing authority, boot artifact, or executable is provided or verified."
+  },
+  "boot": {
+    "cmdline": {
+      "template": [
+        "misa.root=fsuuid=913f2e4a-2b0d-4d71-9b24-97e0c4bfa193",
+        "console=ttyS0,115200",
+        "quiet"
+      ]
+    },
+    "health": {
+      "bless": {
+        "requires": [
+          "base-target"
+        ]
+      },
+      "blessTimeoutSec": 120,
+      "gates": [
+        "base-target",
+        "init-handoff"
+      ]
+    },
+    "publisher": {
+      "rescue": false,
+      "selection": "manual",
+      "sortKey": "misa",
+      "titleKey": "synthetic-workstation",
+      "tries": 0,
+      "type": "bls1"
+    },
+    "root": {
+      "fstype": "ext4",
+      "mountFlags": [
+        "rw"
+      ],
+      "selector": {
+        "kind": "fsuuid",
+        "value": "913f2e4a-2b0d-4d71-9b24-97e0c4bfa193"
+      }
+    },
+    "unlock": {
+      "allowDiscards": false,
+      "luksUuid": null,
+      "mapperName": null,
+      "method": "none",
+      "timeoutSec": 0,
+      "tries": 0
+    }
+  },
+  "exports": [
+    {
+      "argv": [
+        "printf",
+        "hello from synthetic Debian fixture\\n"
+      ],
+      "env": {
+        "LANG": "C.UTF-8"
+      },
+      "grants": [],
+      "id": "debian-hello",
+      "name": "debian-hello",
+      "program": "/usr/bin/printf",
+      "root": "sha256:22e71dae9d9ab166e3d1ca59c285b9c685ee11c367f911d7669b84fbc2dfc27c"
+    }
+  ],
+  "foreignStorage": {
+    "mode": "retain-all"
+  },
+  "host": {
+    "firmware": [
+      "/nix/store/3z7azaa0lhiwck4ga6z86sahyknhbs8m-synthetic-firmware"
+    ],
+    "initAdapter": "dinit",
+    "initrd": "/nix/store/960qj84hk81xip44mydif5dwgj5cc4hj-synthetic-initrd",
+    "kernel": "/nix/store/ar19fsz0xpl6rpmb6f935286grriyhgq-synthetic-linux",
+    "topLevel": "/nix/store/70f37hpc15gmvfszirl4fzd4x0qvz7i5-synthetic-host"
+  },
+  "hostId": "synthetic-workstation",
+  "inputs": {
+    "flakeLockDigest": "sha256:41bff42e22778c20bb708ce0819065b0b45e8f37e6f0aaa0bec44de5f660b525",
+    "flakeSourceDigest": "sha256:e3ae043e1448a360e27cdea6efa1034b41764de9131750851f19e42a9033ab48",
+    "foreignLockDigest": "sha256:ae881ac1ff4a729b11e2a41e2afcda21e14d1659b98962ab0dcf49e72931cf2a",
+    "misaLibraryDigest": "sha256:cdbf9c8afd6e01d58d6270985961301ec2c4ed6f87df7be3ed1f6ba48da1e930"
+  },
+  "machineId": "a7053e985d06f8768ceacc7ecef4ef59",
+  "mounts": [
+    {
+      "owner": "log-sink",
+      "source": "/var/lib/misa/synthetic/log-source",
+      "target": "/var/log/misa-synthetic",
+      "writable": true
+    }
+  ],
+  "providers": [
+    {
+      "digest": "sha256:c03e50d255305c9bd3f0e8914d7dc0d8410c404c5382e5b2f78464085f33dc75",
+      "id": "log-sink",
+      "provides": [
+        "log.sink/v1"
+      ],
+      "requires": []
+    }
+  ],
+  "requiredFeatures": [],
+  "roots": [
+    {
+      "composeReceiptDigest": "sha256:d29b91e894569d19035a4f8f426c993b21f8964ce5524e7ba294e682857be90f",
+      "digest": "sha256:22e71dae9d9ab166e3d1ca59c285b9c685ee11c367f911d7669b84fbc2dfc27c",
+      "libcFamily": "glibc",
+      "name": "debian",
+      "platform": "linux/amd64",
+      "qualification": "R1",
+      "sealedPath": {
+        "kind": "oci",
+        "layout": "/var/lib/misa/synthetic/oci/debian",
+        "manifest": "sha256:22e71dae9d9ab166e3d1ca59c285b9c685ee11c367f911d7669b84fbc2dfc27c"
+      },
+      "sourceLockKey": "debian"
+    }
+  ],
+  "schemaVersion": "misa.plan/v1",
+  "serviceGraph": {
+    "services": [
+      {
+        "after": [],
+        "id": "base",
+        "kind": "milestone",
+        "requiredFeatures": [],
+        "requires": [
+          "log-sink",
+          "worker"
+        ],
+        "scope": {
+          "kind": "system"
+        },
+        "wants": []
+      },
+      {
+        "after": [],
+        "argv": [
+          "misa-log",
+          "--foreground"
+        ],
+        "capabilities": [],
+        "command": "/nix/store/66gz516gyzjh74pa6nnvijlkzns8p6wm-synthetic-logger/bin/misa-log",
+        "cwd": "/",
+        "directories": [],
+        "env": {
+          "LANG": {
+            "kind": "literal",
+            "value": "C.UTF-8"
+          }
+        },
+        "id": "log-sink",
+        "identity": {
+          "gid": 1000,
+          "uid": 1000
+        },
+        "kind": "longrun",
+        "readiness": {
+          "kind": "exec-started"
+        },
+        "requiredFeatures": [],
+        "requires": [],
+        "restart": {
+          "kind": "never"
+        },
+        "scope": {
+          "kind": "system"
+        },
+        "sockets": [],
+        "stop": {
+          "gracePeriod": 10,
+          "killProcessGroup": true,
+          "signal": "SIGTERM"
+        },
+        "wants": []
+      },
+      {
+        "after": [],
+        "argv": [
+          "misa-worker",
+          "--foreground"
+        ],
+        "capabilities": [],
+        "command": "/nix/store/7b7fzi4k05sjfphvqviapjvmsgicnqyf-synthetic-worker/bin/misa-worker",
+        "cwd": "/",
+        "directories": [],
+        "env": {
+          "LANG": {
+            "kind": "literal",
+            "value": "C.UTF-8"
+          }
+        },
+        "id": "worker",
+        "identity": {
+          "gid": 1000,
+          "uid": 1000
+        },
+        "kind": "longrun",
+        "readiness": {
+          "kind": "exec-started"
+        },
+        "requiredFeatures": [],
+        "requires": [
+          "log-sink"
+        ],
+        "restart": {
+          "kind": "never"
+        },
+        "scope": {
+          "kind": "system"
+        },
+        "sockets": [],
+        "stop": {
+          "gracePeriod": 10,
+          "killProcessGroup": true,
+          "signal": "SIGTERM"
+        },
+        "wants": []
+      }
+    ],
+    "targets": {
+      "base": [
+        "log-sink",
+        "worker"
+      ]
+    }
+  },
+  "target": {
+    "kernelArch": "x86_64",
+    "rootFs": {
+      "kind": "fsuuid",
+      "value": "913f2e4a-2b0d-4d71-9b24-97e0c4bfa193"
+    },
+    "system": "x86_64-linux"
+  },
+  "trust": {
+    "approvers": {
+      "keys": [],
+      "mode": "interactive",
+      "threshold": 0
+    },
+    "channel": {
+      "rootDigest": "sha256:49fd152640a5c78c79863f6facdb0a9401e4822e9445bc3da5e8b49d832481aa",
+      "rootVersion": 1,
+      "thresholds": {
+        "root": 1,
+        "snapshot": 1,
+        "targets": 1,
+        "timestamp": 1
+      }
+    },
+    "epoch": 1,
+    "imagePublishers": {
+      "debian": [
+        {
+          "alg": "ed25519",
+          "keyId": "synthetic-review",
+          "status": "active",
+          "validFrom": 1704067200,
+          "validUntil": 1893456000
+        }
+      ]
+    },
+    "nixSubstituters": [
+      {
+        "publicKeys": [
+          {
+            "alg": "ed25519",
+            "keyId": "synthetic-review",
+            "publicKey": "38keZD7T9g3b0kkvk51jqef4olMcJ1BHnf19ocucnrI="
+          }
+        ],
+        "requireSigs": true,
+        "url": "https://cache.example.invalid/misa"
+      }
+    ],
+    "repoKeys": {
+      "apt:debian": [
+        {
+          "alg": "ed25519",
+          "keyId": "synthetic-review",
+          "publicKey": "38keZD7T9g3b0kkvk51jqef4olMcJ1BHnf19ocucnrI="
+        }
+      ]
+    },
+    "time": {
+      "floorEpoch": 1767225600,
+      "source": "rtc+bounded-ntp"
+    }
+  },
+  "users": [
+    {
+      "gid": 1000,
+      "home": "/home/operator",
+      "name": "operator",
+      "uid": 1000
+    }
+  ],
+  "volumes": [
+    {
+      "backupPolicy": {
+        "kind": "snapshot",
+        "retention": "daily-seven"
+      },
+      "consumers": [
+        "worker"
+      ],
+      "mountPath": "/var/lib/misa/volumes/worker-data",
+      "owner": "worker",
+      "schemaEpoch": 1,
+      "volumeId": "worker-data"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+[package]
+name = "misa-cli"
+description = "Unprivileged MisaOS schema and plan inspection tool"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "misa-plan"
+path = "src/main.rs"
+
+[dependencies]
+misa-plan = { path = "../misa-plan" }
+clap.workspace = true
+serde_json.workspace = true

@@ -1,0 +1,107 @@
+{
+  "adapterIdentity": "sha256:ab383fb7608e0be291a90911439581f1b8ca0167870d5cb349e6472917ac8e04",
+  "boot": {
+    "cmdline": {
+      "template": [
+        "misa.root=fsuuid=913f2e4a-2b0d-4d71-9b24-97e0c4bfa193",
+        "console=ttyS0,115200",
+        "quiet"
+      ]
+    },
+    "firmware": {
+      "dir": "/nix/store/3z7azaa0lhiwck4ga6z86sahyknhbs8m-synthetic-firmware/lib/firmware",
+      "initrdFiles": []
+    },
+    "health": {
+      "bless": {
+        "requires": [
+          "base-target"
+        ]
+      },
+      "blessTimeoutSec": 120,
+      "gates": [
+        "base-target",
+        "init-handoff"
+      ]
+    },
+    "init": {
+      "adapterBuildId": "sha256:ab383fb7608e0be291a90911439581f1b8ca0167870d5cb349e6472917ac8e04",
+      "adapterId": "dinit",
+      "elfMachine": 62,
+      "path": "/nix/store/3ar38x5h8932536hvnly1axcl293a878-synthetic-dinit/bin/dinit",
+      "sha256": "sha256:cb05f93dfd16b6194aaa3a6258089082856e0b96dddc27c51e2791455f682c76"
+    },
+    "initrd": {
+      "buildId": "sha256:2ba2675a55e109c4fb8662313f74839427c048b9c4d6d7a4135658e182e8bb86",
+      "parts": [
+        {
+          "role": "microcode",
+          "sha256": "sha256:d19901e45ff0526055d5ae2f060a1ccab46b73fb58a8d0ffc9184baf32fe15df",
+          "size": "3145728",
+          "store": "/nix/store/qvz95sazp2y0kxadix03v1i07va6pg6l-synthetic-microcode/intel-ucode.img"
+        },
+        {
+          "role": "main",
+          "sha256": "sha256:bb4289ae4eff802b28ce96f4add9a80b6a7acd2377b8664a0e86ac2b26433715",
+          "size": "33554432",
+          "store": "/nix/store/960qj84hk81xip44mydif5dwgj5cc4hj-synthetic-initrd/initrd.img"
+        }
+      ]
+    },
+    "kernel": {
+      "cmdlineLimit": 2048,
+      "sha256": "sha256:db03cdda4998bfad169e9528ad07e1eb5cde790af3c440db053f58f88b83d5f2",
+      "size": "12582912",
+      "store": "/nix/store/ar19fsz0xpl6rpmb6f935286grriyhgq-synthetic-linux/bzImage",
+      "uname": "6.12.34-misa-synthetic"
+    },
+    "modules": {
+      "dir": "/nix/store/8x9yanpw1yp310rj45877n4x377lsadh-synthetic-linux-modules/lib/modules",
+      "initrdOrder": [
+        "virtio_pci",
+        "virtio_blk",
+        "ext4"
+      ],
+      "uname": "6.12.34-misa-synthetic"
+    },
+    "mounts": [],
+    "platform": {
+      "arch": "x86_64"
+    },
+    "publisher": {
+      "rescue": false,
+      "selection": "manual",
+      "sortKey": "misa",
+      "titleKey": "synthetic-workstation",
+      "tries": 0,
+      "type": "bls1"
+    },
+    "root": {
+      "fstype": "ext4",
+      "mountFlags": [
+        "rw"
+      ],
+      "selector": {
+        "kind": "fsuuid",
+        "value": "913f2e4a-2b0d-4d71-9b24-97e0c4bfa193"
+      }
+    },
+    "schema": "misa.boot/v1",
+    "unlock": {
+      "allowDiscards": false,
+      "luksUuid": null,
+      "mapperName": null,
+      "method": "none",
+      "timeoutSec": 0,
+      "tries": 0
+    }
+  },
+  "generationId": "sha256:c7e9031f9416642cf0d31d0b92eeef35f38312a446ecdddfff4915b01188c0b4",
+  "machineId": "a7053e985d06f8768ceacc7ecef4ef59",
+  "planDigest": "sha256:cca29d6097450c5615c312f60b6edb515ba06f54929a00993c5ed3b6d49a2e74",
+  "requiredFeatures": [],
+  "roots": [
+    "sha256:22e71dae9d9ab166e3d1ca59c285b9c685ee11c367f911d7669b84fbc2dfc27c"
+  ],
+  "schemaVersion": "misa.generation/v1"
+}
