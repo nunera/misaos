@@ -1,0 +1,186 @@
+{
+  "$comment": "OCI-only locally approved import profile. Strict JSON and semantic/cryptographic verification are required in addition to this closed schema. A local operator signature is not a publisher signature or launch qualification.",
+  "$defs": {
+    "AsciiId": {
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9.-]*$(?![\\s\\S])",
+      "type": "string"
+    },
+    "Digest": {
+      "maxLength": 71,
+      "minLength": 71,
+      "pattern": "^sha256:[0-9a-f]{64}$(?![\\s\\S])",
+      "type": "string"
+    },
+    "ImportLimits": {
+      "$comment": "Semantic checks additionally require maxFileBytes <= maxExpandedBytes and metadata sizes <= maxBlobBytes.",
+      "additionalProperties": false,
+      "properties": {
+        "maxBlobBytes": {
+          "maxLength": 9,
+          "minLength": 1,
+          "pattern": "^(?:[1-9][0-9]{0,7}|536870912|[1-4][0-9]{8}|5[0-2][0-9]{7}|53[0-5][0-9]{6}|536[0-7][0-9]{5}|5368[0-6][0-9]{4}|536870[0-8][0-9]{2}|53687090[0-9]{1}|53687091[0-1][0-9]{0})$(?![\\s\\S])",
+          "type": "string"
+        },
+        "maxEntries": {
+          "maximum": 200000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "maxExpandedBytes": {
+          "maxLength": 10,
+          "minLength": 1,
+          "pattern": "^(?:[1-9][0-9]{0,8}|2147483648|1[0-9]{9}|20[0-9]{8}|21[0-3][0-9]{7}|214[0-6][0-9]{6}|2147[0-3][0-9]{5}|21474[0-7][0-9]{4}|214748[0-2][0-9]{3}|2147483[0-5][0-9]{2}|21474836[0-3][0-9]{1}|214748364[0-7][0-9]{0})$(?![\\s\\S])",
+          "type": "string"
+        },
+        "maxExpansionRatio": {
+          "maximum": 256,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "maxFileBytes": {
+          "maxLength": 9,
+          "minLength": 1,
+          "pattern": "^(?:[1-9][0-9]{0,7}|536870912|[1-4][0-9]{8}|5[0-2][0-9]{7}|53[0-5][0-9]{6}|536[0-7][0-9]{5}|5368[0-6][0-9]{4}|536870[0-8][0-9]{2}|53687090[0-9]{1}|53687091[0-1][0-9]{0})$(?![\\s\\S])",
+          "type": "string"
+        },
+        "maxPathBytes": {
+          "maximum": 4096,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "timeoutSeconds": {
+          "maximum": 600,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "maxBlobBytes",
+        "maxExpandedBytes",
+        "maxFileBytes",
+        "maxEntries",
+        "maxPathBytes",
+        "maxExpansionRatio",
+        "timeoutSeconds"
+      ],
+      "type": "object"
+    },
+    "LockedImage": {
+      "$comment": "source is a repository without credentials, ports, tag or digest. sourceIndex preserves the exact index used for platform selection. libcFamily is an operator declaration, not ELF qualification.",
+      "additionalProperties": false,
+      "properties": {
+        "image": {
+          "$ref": "#/$defs/LockedManifest"
+        },
+        "libcFamily": {
+          "enum": [
+            "glibc",
+            "musl"
+          ]
+        },
+        "limits": {
+          "$ref": "#/$defs/ImportLimits"
+        },
+        "source": {
+          "maxLength": 255,
+          "minLength": 1,
+          "pattern": "^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?/[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?(?:/[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?)*$(?![\\s\\S])",
+          "type": "string"
+        },
+        "sourceIndex": {
+          "$ref": "#/$defs/LockedIndex"
+        }
+      },
+      "required": [
+        "source",
+        "image",
+        "libcFamily",
+        "limits"
+      ],
+      "type": "object"
+    },
+    "LockedIndex": {
+      "additionalProperties": false,
+      "properties": {
+        "digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "mediaType": {
+          "enum": [
+            "application/vnd.oci.image.index.v1+json",
+            "application/vnd.docker.distribution.manifest.list.v2+json"
+          ]
+        },
+        "size": {
+          "maxLength": 7,
+          "minLength": 1,
+          "pattern": "^(?:[1-9][0-9]{0,5}|1048576|10[0-3][0-9]{4}|104[0-7][0-9]{3}|1048[0-4][0-9]{2}|10485[0-6][0-9]{1}|104857[0-5][0-9]{0})$(?![\\s\\S])",
+          "type": "string"
+        }
+      },
+      "required": [
+        "mediaType",
+        "digest",
+        "size"
+      ],
+      "type": "object"
+    },
+    "LockedManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "mediaType": {
+          "const": "application/vnd.oci.image.manifest.v1+json"
+        },
+        "size": {
+          "maxLength": 7,
+          "minLength": 1,
+          "pattern": "^(?:[1-9][0-9]{0,5}|1048576|10[0-3][0-9]{4}|104[0-7][0-9]{3}|1048[0-4][0-9]{2}|10485[0-6][0-9]{1}|104857[0-5][0-9]{0})$(?![\\s\\S])",
+          "type": "string"
+        }
+      },
+      "required": [
+        "mediaType",
+        "digest",
+        "size"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/ZacharySF/misaos/schemas/misa.lock-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "strata": {
+      "additionalProperties": {
+        "$ref": "#/$defs/LockedImage"
+      },
+      "maxProperties": 64,
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "#/$defs/AsciiId"
+      },
+      "type": "object"
+    },
+    "targetPlatform": {
+      "enum": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "targetPlatform",
+    "strata"
+  ],
+  "title": "Misa S1 lock v1",
+  "type": "object"
+}

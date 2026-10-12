@@ -1,5 +1,5 @@
 {
-  description = "MisaOS S0: schema-only plans and strict canonical record validation";
+  description = "MisaOS: strict plans and locally approved, retained OCI roots";
 
   # Explicit updates only; this revision is from the stable nixos-26.05 branch.
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/6fcc160353f63555b560f25588925133c8f61f2a";
@@ -9,7 +9,7 @@
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
       planLib = import ./nix/lib.nix {
-        getTool = system: self.packages.${system}.misa-plan;
+        getTool = system: self.packages.${system}.misa;
       };
     in {
       lib = {
@@ -20,8 +20,8 @@
         let
           pkgs = import nixpkgs { inherit system; };
         in rec {
-          misa-plan = pkgs.callPackage ./nix/package.nix { };
-          default = misa-plan;
+          misa = pkgs.callPackage ./nix/package.nix { };
+          default = misa;
           strata-fixture = planLib.mkStrataPlan {
             inherit pkgs;
             name = "misa-s0-strata-fixture";
@@ -58,7 +58,7 @@
             nativeBuildInputs = [ pkgs.python3 ];
           } ''
             python3 ${./nix/s0.py} \
-              --tool ${packages.misa-plan}/bin/misa-plan \
+              --tool ${packages.misa}/bin/misa-plan \
               --fixtures ${./fixtures} \
               --nix-wire ${packages.wire-fixture}/wire.json \
               --strata ${packages.strata-fixture}/strata.json \
@@ -73,7 +73,13 @@
         let pkgs = import nixpkgs { inherit system; };
         in {
           default = pkgs.mkShell {
-            packages = with pkgs; [ cargo rustc rustfmt clippy python3 ];
+            packages = with pkgs; [ cargo rustc rustfmt clippy python3 skopeo umoci bubblewrap ];
+            MISA_SKOPEO = "${pkgs.skopeo}/bin/skopeo";
+            MISA_UMOCI = "${pkgs.umoci}/bin/umoci";
+            MISA_BWRAP = "${pkgs.bubblewrap}/bin/bwrap";
+            MISA_TEST_SKOPEO = "${pkgs.skopeo}/bin/skopeo";
+            MISA_TEST_UMOCI = "${pkgs.umoci}/bin/umoci";
+            MISA_TEST_BWRAP = "${pkgs.bubblewrap}/bin/bwrap";
           };
         });
     };

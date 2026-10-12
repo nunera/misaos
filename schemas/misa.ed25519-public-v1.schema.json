@@ -1,0 +1,24 @@
+{
+  "$comment": "OCI-only locally approved import profile. Strict JSON and semantic/cryptographic verification are required in addition to this closed schema. A local operator signature is not a publisher signature or launch qualification.",
+  "$defs": {},
+  "$id": "https://github.com/ZacharySF/misaos/schemas/misa.ed25519-public-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "publicKey": {
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$(?![\\s\\S])",
+      "type": "string"
+    },
+    "schemaVersion": {
+      "const": "misa.ed25519-public/v1"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "publicKey"
+  ],
+  "title": "Misa S1 ed25519-public v1",
+  "type": "object"
+}

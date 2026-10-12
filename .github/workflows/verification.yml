@@ -1,4 +1,4 @@
-name: S0 schema conformance
+name: MisaOS verification
 
 on:
   push:
@@ -8,8 +8,8 @@ permissions:
   contents: read
 
 jobs:
-  schema-and-nix:
-    name: Rust conformance and locked Nix showcase (no boot)
+  plans-and-images:
+    name: Strict plans, signed image admission and retained storage
     runs-on: ubuntu-24.04
     steps:
       - name: Check out source
@@ -24,7 +24,7 @@ jobs:
           nix_conf: |
             experimental-features = nix-command flakes
             accept-flake-config = false
-      - name: Rust conformance with the locked development toolchain
+      - name: Rust conformance and real rootless OCI storage
         run: |
           nix develop --no-update-lock-file --no-write-lock-file "path:$PWD" \
             --command cargo test --workspace --locked --target-dir "$RUNNER_TEMP/misaos-target"

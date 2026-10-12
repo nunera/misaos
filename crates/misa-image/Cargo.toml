@@ -1,0 +1,23 @@
+[package]
+name = "misa-image"
+description = "Digest-locked, locally approved OCI import and retain-all storage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+misa-plan = { path = "../misa-plan" }
+serde.workspace = true
+serde_json.workspace = true
+serde_jcs.workspace = true
+sha2.workspace = true
+jsonschema.workspace = true
+ed25519-dalek.workspace = true
+getrandom.workspace = true
+hex.workspace = true
+flate2.workspace = true
+tar.workspace = true
+rustix.workspace = true
+fs2.workspace = true
+tempfile.workspace = true
+walkdir.workspace = true

@@ -1,0 +1,43 @@
+{
+  "$comment": "OCI-only locally approved import profile. Strict JSON and semantic/cryptographic verification are required in addition to this closed schema. A local operator signature is not a publisher signature or launch qualification.",
+  "$defs": {
+    "Digest": {
+      "maxLength": 71,
+      "minLength": 71,
+      "pattern": "^sha256:[0-9a-f]{64}$(?![\\s\\S])",
+      "type": "string"
+    }
+  },
+  "$id": "https://github.com/ZacharySF/misaos/schemas/misa.approval-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "authority": {
+      "const": "local-image-admission"
+    },
+    "keyId": {
+      "$ref": "#/$defs/Digest"
+    },
+    "lockDigest": {
+      "$ref": "#/$defs/Digest"
+    },
+    "schemaVersion": {
+      "const": "misa.approval/v1"
+    },
+    "signature": {
+      "maxLength": 128,
+      "minLength": 128,
+      "pattern": "^[0-9a-f]{128}$(?![\\s\\S])",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "authority",
+    "lockDigest",
+    "keyId",
+    "signature"
+  ],
+  "title": "Misa S1 approval v1",
+  "type": "object"
+}
