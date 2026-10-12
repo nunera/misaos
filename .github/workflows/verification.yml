@@ -10,7 +10,9 @@ permissions:
 jobs:
   plans-and-images:
     name: Strict plans, signed image admission and retained storage
-    runs-on: ubuntu-24.04
+    # 24.04 denies the pinned bwrap's namespace setup (Ubuntu bug 2069526).
+    # Keep every runtime test and the sandbox intact; never disable host policy.
+    runs-on: ubuntu-22.04
     steps:
       - name: Check out source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6, Node.js 24
