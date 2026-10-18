@@ -1,13 +1,15 @@
 use clap::{Parser, Subcommand, ValueEnum};
-use misa_image::{Error, Result, Store, Tools, model, resolve, trust};
+use misa_image::{Error, Result, Store, Tools, model, publisher, resolve, trust};
 use serde::Serialize;
 use serde_json::json;
 use std::{
+    ffi::OsString,
     fs::{self, File, OpenOptions},
     io::{self, Read, Write},
     os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
     process::ExitCode,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 #[derive(Parser)]
@@ -37,6 +39,23 @@ enum Command {
     Schema {
         #[arg(value_enum)]
         domain: Schema,
+    },
+    /// Run one declared export of a strict strata plan from its verified retained root.
+    /// There is no arbitrary-command mode and no host fallback; arguments after `--`
+    /// are appended to the export's declared argv.
+    Run {
+        #[arg(long)]
+        plan: PathBuf,
+        /// Caller-owned private store holding the imported and publisher-qualified root.
+        #[arg(long)]
+        store: PathBuf,
+        #[arg(long)]
+        export: String,
+        /// Externally pinned, read-only keyring directory of `<keyId>.json` publisher records.
+        #[arg(long)]
+        publisher_keyring: PathBuf,
+        #[arg(last = true)]
+        args: Vec<OsString>,
     },
 }
 
@@ -111,6 +130,33 @@ enum Strata {
     Doctor {
         #[arg(long)]
         store: PathBuf,
+    },
+    /// Sign an exact locked source/manifest/platform as its image PUBLISHER (not local admission).
+    PublisherSign {
+        #[arg(long)]
+        lock: PathBuf,
+        #[arg(long)]
+        name: String,
+        /// ASCII key alias pinned in the keyring, not a key fingerprint.
+        #[arg(long)]
+        key_id: String,
+        #[arg(long)]
+        secret_key: PathBuf,
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+    /// Verify a publisher statement against the pinned keyring, then persist its proof.
+    PublisherQualify {
+        /// Caller-owned private store holding the locally admitted import.
+        #[arg(long)]
+        store: PathBuf,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        statement: PathBuf,
+        /// Externally pinned, read-only keyring directory of `<keyId>.json` records.
+        #[arg(long)]
+        publisher_keyring: PathBuf,
     },
 }
 
@@ -244,6 +290,25 @@ fn run(command: Command) -> Result<()> {
                 None,
             )
         }
+        Command::Run {
+            plan,
+            store,
+            export,
+            publisher_keyring,
+            args,
+        } => {
+            let code = misa_exec::run(
+                &misa_exec::Request {
+                    plan,
+                    store,
+                    export,
+                    publisher_keyring,
+                },
+                &args,
+            )?;
+            // The payload owns the exit status; launcher failures never reach here.
+            std::process::exit(code)
+        }
         Command::Strata { command } => match command {
             Strata::Resolve {
                 image,
@@ -318,6 +383,54 @@ fn run(command: Command) -> Result<()> {
             Strata::List { store } => emit(&Store::open(&store)?.list()?, None),
             Strata::Doctor { store } => {
                 emit(&Store::open(&store)?.doctor(&Tools::from_env()?)?, None)
+            }
+            Strata::PublisherSign {
+                lock,
+                name,
+                key_id,
+                secret_key,
+                output,
+            } => {
+                let lock = model::parse_lock(&read_record(&lock, false)?)?;
+                let locked = lock.strata.get(&name).ok_or_else(|| {
+                    Error::new("E_LOCK", "name", "stratum is not in the supplied lock")
+                })?;
+                let secret = trust::parse_secret_key(&read_record(&secret_key, true)?)?;
+                let statement = publisher::sign_statement(
+                    &locked.source,
+                    &locked.image.digest,
+                    &lock.target_platform,
+                    &key_id,
+                    &secret,
+                )?;
+                emit(&statement, output.as_deref())
+            }
+            Strata::PublisherQualify {
+                store,
+                name,
+                statement,
+                publisher_keyring,
+            } => {
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_err(|_| {
+                        Error::new("E_TRUST", "clock", "system clock precedes the Unix epoch")
+                    })?
+                    .as_secs();
+                let verified = publisher::verify_statement(
+                    publisher::parse_statement(&read_record(&statement, false)?)?,
+                    &publisher_keyring,
+                    now,
+                )?;
+                let source = verified.statement().source.clone();
+                let digest = verified.statement().manifest_digest.clone();
+                let retained = Store::open(&store)?;
+                let proof = retained.qualify_publisher(&verified, &name, &source, &digest)?;
+                emit(
+                    &json!({"proof":proof,"publisherVerification":"performed",
+                        "publisherAuthority":"image-publisher"}),
+                    None,
+                )
             }
         },
     }

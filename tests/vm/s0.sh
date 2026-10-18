@@ -11,7 +11,7 @@ if [[ -n ${MISA_PLAN_BIN:-} ]]; then
   tool=$MISA_PLAN_BIN
 else
   # Keep build artifacts out of the source tree, and never rewrite Cargo.lock.
-  cargo build --locked --manifest-path "$repo/Cargo.toml" \
+  RUSTC_WRAPPER= cargo build --locked --manifest-path "$repo/Cargo.toml" \
     --package misa-cli --bin misa-plan --target-dir "$work/target"
   tool="$work/target/debug/misa-plan"
 fi

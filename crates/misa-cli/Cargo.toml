@@ -16,6 +16,7 @@ path = "src/bin/misa.rs"
 [dependencies]
 misa-plan = { path = "../misa-plan" }
 misa-image = { path = "../misa-image" }
+misa-exec = { path = "../misa-exec" }
 serde.workspace = true
 tempfile.workspace = true
 serde_jcs.workspace = true

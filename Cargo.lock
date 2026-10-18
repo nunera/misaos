@@ -608,6 +608,7 @@ name = "misa-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "misa-exec",
  "misa-image",
  "misa-plan",
  "rustix",
@@ -615,6 +616,22 @@ dependencies = [
  "serde_jcs",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "misa-exec"
+version = "0.1.0"
+dependencies = [
+ "misa-image",
+ "misa-plan",
+ "rustix",
+ "serde",
+ "serde_jcs",
+ "serde_json",
+ "sha2",
+ "tar",
+ "tempfile",
+ "walkdir",
 ]
 
 [[package]]

@@ -2,7 +2,7 @@
 
 Declarative Linux hosts and isolated foreign application roots, following **MisaOS Architecture and Implementation Contract, baseline 1.4**.
 
-**Implemented: S0 wire contracts, plus the S1 OCI admission/import/retention slice.** `misa-plan` validates plans; `misa` resolves, locally approves, imports and checks real foreign roots. This is not yet a bootable operating system, application launcher or NixOS activation module. It does not change the machine's bootloader, init, accounts, packages or services. Extraction uses temporary unprivileged namespaces; persistent writes are limited to explicitly selected key/output/store paths.
+**Implemented: S0 wire contracts and the S1 standalone strata path on stock NixOS.** `misa-plan` validates plans; `misa` admits, imports, qualifies, checks and launches declared foreign exports from retained OCI roots. `nixosModules.strata` renders per-user CLI wrappers and desktop entries from a validated immutable plan. It does not own the host bootloader, init, accounts, services or Nix store; every import and application launch runs as an ordinary user.
 
 ## Run it
 
@@ -55,11 +55,13 @@ Key generation creates a new `0700` directory with `0600` key files. Keys and `-
 
 Repeat the import command with `--offline` to use only the retained store, or `--from-layout /absolute/oci/layout` to import a local OCI layout without network access. A missing/corrupt local artifact is an error, never a reason to fetch. `misa schema lock|approval|public-key` prints the corresponding closed wire schema.
 
-### Admission and identity
+### Admission, publisher qualification and identity
 
-This slice uses **Ed25519 local operator approval, not an upstream publisher signature**. The caller supplies the trusted public key explicitly. A domain-separated signature binds the SHA-256 of the entire JCS-canonical lock, including repository, index/manifest descriptors, platform and resource limits. Changed locks, unknown properties, duplicate JSON keys, wrong authorities and invalid signatures fail before admission. Skopeo's scoped transport policy allows downloading that approved repository into private staging; transport acceptance alone never admits an image.
+Local Ed25519 operator approval is **not** an image publisher signature. The caller supplies the local trusted public key to import. A domain-separated signature binds the SHA-256 of the entire JCS-canonical lock, including repository, index/manifest descriptors, platform and resource limits. Changed locks, unknown properties, duplicate JSON keys, wrong authorities and invalid signatures fail before admission. Skopeo's scoped transport policy allows downloading that approved repository into private staging; transport acceptance alone never admits an image.
 
-The importer independently verifies the original index, manifest, config and every layer's size/media type/SHA-256, then verifies ordered uncompressed `rootfs.diff_ids`. The manifest digest remains the root identity. The import response contains a `misa.import/v1` receipt, its digest and a `VerifiedRootRef` usable by the existing strata schema. `libcFamily` is an operator declaration; `R1` is source/artifact identity qualification, not application ABI, publisher, reproducible-build or launch qualification.
+The importer independently verifies the original index, manifest, config and every layer's size/media type/SHA-256, then verifies ordered uncompressed `rootfs.diff_ids`. The manifest digest remains the root identity. Its receipt is `misa.import/v1`. Import alone does not permit launch: `misa strata publisher-qualify --store STORE --name NAME --statement PUBLISHER_STATEMENT --publisher-keyring KEYRING` verifies a separately signed `misa.publisher/v1` statement against a pinned, externally supplied Ed25519 publisher key, matching the retained manifest, source and platform. `misa run` and `doctor` recheck the retained proof offline. The publisher signing command exists for an actual image publisher (and the independent VM fixture publisher); do **not** sign an upstream image with the local admission key or treat your own attestation as an upstream signature. The checked-in official Debian candidate locks have no publisher statements here and cannot be launched merely by importing them.
+
+`libcFamily` is an operator declaration; `R1` verifies source/artifact identity and publisher qualification, not reproducible builds. At launch, the executable and its ELF interpreter or script chain are resolved inside the sealed root, with native ISA and declared libc compatibility checked before execution. Only declared exports run; there is no arbitrary executable or host-loader fallback.
 
 ### Extraction and retention
 
@@ -72,11 +74,17 @@ The importer independently verifies the original index, manifest, config and eve
 - Single-writer locking, fsynced content and no-replace publication prevent partial roots becoming usable index entries. Reimporting an existing image verifies rather than overwrites it. Both successful roots and failed private stages are retained; only a successful operation's own temporary staging is removed. There is **no GC, deletion, repair or activation command**.
 - `list` reports retained roots, receipts, blob bytes, logical materialized file bytes and incomplete stages. `doctor` rechecks persisted local approvals, OCI bytes and tree digests offline; it never repairs corruption.
 
-**Storage is caller-owned and permission-sealed, not immutable against that caller.** `sealMode: "read-only-permissions"` does not replace a read-only/nosuid/nodev launch view. The owner can replace the entire store and its local evidence; `doctor` is an integrity check, not an external trust anchor. System-owned storage and publisher-policy integration remain separate gates.
+**Storage is caller-owned and permission-sealed, not immutable against that caller.** `sealMode: "read-only-permissions"` is supplemented at launch by an attested read-only/nosuid/nodev mount view with private `/tmp` and `/run`, explicit host grants, sanitized environment and no network namespace access. The owner can still replace the entire store and its local evidence; `doctor` is an integrity check, not a system-owned trust anchor. No per-launch root broker or automatic garbage collector exists.
 
 The bounded profile accepts OCI v1 manifests, raw/gzip layers and UTF-8 paths. It rejects zstd, package composition, global PAX, PAX size overrides, mixed GNU/PAX naming and unrecorded platform variants/requirements. JSON metadata is limited to 1 MiB, extension payloads to 64 KiB and depth to 64. Defaults/caps: 512 MiB per blob/file, 2 GiB expanded bytes, 200,000 entries/view nodes, 4,096-byte paths and a 256:1 expansion ratio. Network fetch additionally caps layer count at 128, declared compressed bytes at the expanded-byte budget and temporary file size with `RLIMIT_FSIZE`; it copies one layer at a time. Private snapshot copying is bounded by `maxExpandedBytes + 3 × maxBlobBytes`.
 
 `timeoutSeconds` is a **phase budget**, not a hard total-operation deadline: snapshot copying, a complete verifier invocation, a tool invocation and a tree scan each receive a budget (default 300 seconds, maximum 600). Retained-blob checks have individual budgets. Filesystem checks are cooperative; kernel-blocked reads/fsync/publication are not preemptible. Failed stages and retained content consume disk indefinitely, so monitor the reported growth.
+
+## Standalone strata module and launcher
+
+Import `misa.nixosModules.strata` in a stock NixOS configuration. Set `misa.strata.package = misa.packages.${pkgs.system}.misa;` and declare `misa.strata.instances.<name>` with `plan` (a `misa.lib.mkStrataPlan` output), `user` (an existing normal account), `store` (an absolute private path under that user's home), `cliExports`, `desktopExports` and `publisherKeys`. The export IDs must occur in the same plan; desktop exports need a desktop record. The module installs only the CLI package and per-user profile exports. It does not create a store, import on activation, add a service or change boot. The owning user separately performs local approval, import and publisher qualification.
+
+For a qualified root, `misa run --plan /nix/store/.../strata.json --store /home/USER/.../roots --export EXPORT --publisher-keyring /nix/store/.../keyring [-- ARG...]` checks the plan, declared grants, retained receipt and publisher proof; it then runs the exact argument vector unprivileged using pinned bubblewrap. The plan and keyring are immutable Nix outputs in module-generated wrappers. X11, Wayland and session-bus sockets require explicit grants; the VM acceptance cell uses a Debian xclock X11 desktop entry in an IceWM session. Desktop entries deliberately provide no host icon copy or `%f`/`%U` field code in S1; file-open associations and icon publishing are not qualified. A plain official Debian base image without an independent publisher statement remains an import-only example, not a runnable export.
 
 
 ## S0 plan contracts
@@ -118,7 +126,7 @@ misa.lib.mkStrataPlan {
 }
 ```
 
-Outputs contain `strata.json` or `plan.json`, plus `receipt.json` and `digest.txt`. They are not NixOS modules and grant no activation authority. The checked-in fixture outputs are `strata-fixture`, `plan-fixture`, `generation-fixture`, and `wire-fixture`.
+Outputs contain `strata.json` or `plan.json`, plus `receipt.json` and `digest.txt`. They have only schema/semantic authority: importing `nixosModules.strata` and explicitly declaring an instance installs the validated plan's exports, but admission, publisher qualification and store population remain separate runtime operations. The checked-in fixture outputs are `strata-fixture`, `strata-desktop-fixture`, `plan-fixture`, `generation-fixture` and `wire-fixture`.
 
 ## Verification
 
@@ -127,31 +135,33 @@ cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
 nix flake check --no-update-lock-file --no-write-lock-file .
 tests/vm/s0.sh
+tests/vm/s1.sh
 ```
 
 Run Rust checks inside `nix develop` so the real extraction tests receive `MISA_TEST_SKOPEO`, `MISA_TEST_UMOCI` and `MISA_TEST_BWRAP`. Without those variables, or under UID 0, the runtime storage cases explicitly skip; a passing sandboxed Nix build alone is not rootless-runtime evidence. GitHub Actions runs these tests outside the Nix build sandbox with the pinned tools.
 
-CI uses Ubuntu 22.04 with the same locked Nix userland. The 24.04 runner denied the pinned bubblewrap's network-namespace setup (`Failed RTM_NEWADDR: Operation not permitted`), matching [Ubuntu's documented restriction](https://bugs.launchpad.net/bugs/2069526). The workflow does not disable AppArmor, drop namespace isolation, run imports as root or skip the runtime cases to obtain a pass. Ubuntu installations enforcing that policy need a separately reviewed host sandbox policy; this project does not change one automatically.
+CI uses Ubuntu 22.04 with the same locked Nix userland and enables KVM for the VM gate. The 24.04 runner denied the pinned bubblewrap's network-namespace setup (`Failed RTM_NEWADDR: Operation not permitted`), matching [Ubuntu's documented restriction](https://bugs.launchpad.net/bugs/2069526). The workflow does not disable AppArmor, drop namespace isolation, run imports as root or skip runtime cases to obtain a pass. Ubuntu installations enforcing that policy need a separately reviewed host sandbox policy; this project does not change one automatically.
 
-The image suite covers signature/lock substitution, descriptor/platform/diff-ID corruption, malicious archives, whiteout ordering, decompression bounds, inherited-pipe deadlines, real rootless extraction, retention, offline reimport and tamper detection. A separate live x86_64 smoke imported the two checked-in Debian locks, ran each with its own ELF loader/libc using explicit `bubblewrap`, denied root writes/host paths, kept a Bookworm process alive across the Trixie import and reimported both with zero network syscalls under `strace`. Standard `skopeo` could read both retained manifests. This is importer evidence, **not an implemented Misa launcher or the complete S1 gate**.
+The image suite covers signature/lock substitution, descriptor/platform/diff-ID corruption, malicious archives, whiteout ordering, decompression bounds, inherited-pipe deadlines, real rootless extraction, retention, offline reimport and tamper detection. A separate live x86_64 importer smoke used checked-in Debian locks with explicit bubblewrap; it was importer evidence, not publisher or launcher evidence.
 
-The showcase lives at the architecture's `tests/vm/` interface, but **S0 does not launch a VM**. It builds the locked Nix fixture outputs, executes the real CLI, compares canonical bytes and independent SHA-256 identities, checks the generation-to-plan/root bindings, and exercises malformed-record and authority-domain failures. It uses temporary files and does not rewrite locks. Set `MISA_PLAN_BIN` to an already-built executable to avoid an additional Cargo build.
+`tests/vm/s0.sh` is a wire-contract showcase, not a VM. `tests/vm/s1.sh` is the S1 gate: an oracle NixOS VM imports the pinned Debian-derived fixture to produce real receipts, then a stock-NixOS graphical VM activates plans built from those receipts. It checks local admission versus independent publisher qualification, CLI and X11 desktop launch, denied host paths, writable grant and sealed root, an old process surviving a plan upgrade, retain-all disk growth, and offline CLI/GUI relaunch and retained proofs after reboot. The official Debian base remains unsigned and unlaunchable. The fixture publisher and operator test keys are generated in the Nix store **only for this disposable VM**; never put production secret keys in Nix derivations.
 
-Repeated locked realization may use the Nix cache. It proves stable evaluated identities, **not** an independent byte-for-byte rebuild witness. Only the locally exercised architecture/toolchain is evidenced; the aarch64 flake output is not a hardware qualification claim.
+The S1 VM needs local KVM and fixed-output network fetches **before** boot, for the digest-pinned Debian base and SHA-256-pinned snapshot packages. The VM itself has no registry access. A passing fixture run proves this exact x86_64 stock-NixOS/Nixpkgs cell, not independent byte-for-byte image rebuilds, another compositor, publisher identity for official Debian, the aarch64 flake output or hardware qualification.
 
 ## Code map
 
 | Path | Responsibility |
 | --- | --- |
 | `crates/misa-plan/` | Strict parser, closed-schema validation, semantic invariants, canonical identities and conformance tests |
-| `crates/misa-image/` | Strict foreign locks, Ed25519 local admission, OCI resolution/preflight, retained storage and offline integrity checks |
-| `crates/misa-cli/` | `misa-plan` inspection and unprivileged `misa` image commands |
+| `crates/misa-image/` | Foreign locks, local admission, independent publisher qualification, OCI verification, retained storage and offline integrity checks |
+| `crates/misa-exec/` | Strict export selection, ABI preflight and attested unprivileged execution view |
+| `crates/misa-cli/` | `misa-plan` inspection and `misa` import, qualification and launch commands |
 | `schemas/` | Published schemas and their deterministic Python generator |
 | `fixtures/` | Synthetic records and byte-level acceptance/rejection vectors |
 | `examples/` | Real digest-pinned Debian candidate locks; no secret keys or operator approvals |
-| `nix/`, `flake.nix`, `flake.lock` | Pinned packaging, declaration constructors and cross-language checks |
-| `tests/vm/s0.sh` | End-to-end S0 showcase |
-| `.github/workflows/verification.yml` | Plan and image CI with pinned dependencies |
+| `nix/`, `flake.nix`, `flake.lock` | Pinned packaging, declaration constructors, NixOS strata module and cross-language checks |
+| `tests/vm/s0.sh`, `tests/vm/s1.sh` | S0 conformance showcase and stock-NixOS S1 acceptance VM |
+| `.github/workflows/verification.yml` | Rust, Nix and VM checks with pinned dependencies |
 
 `python3 schemas/generate.py` regenerates the schemas and synthetic record fixtures. Shared nested definitions have one generator source; generated schemas contain only reachable definitions and need no network resolution. The generator's fixture hashing is intentionally restricted to ASCII property names and safe integers; general JCS encoding belongs to the Rust implementation. `fixtures/wire.json` is the independent golden corpus and is not regenerated by that script.
 
@@ -159,12 +169,11 @@ Named-but-unspecified nested types in the PDF have conservative concrete layouts
 
 ## Next implementation sequence
 
-1. **Continue S1: application launch and stock-NixOS integration.** Implement `misa-exec` for declared exports, read-only/nosuid/nodev roots, explicit grants and sanitized environments; then a narrowly scoped NixOS strata module/export registry and one Debian CLI plus one desktop export in the existing graphical session. Integrate the publisher trust policy rather than relabeling local approvals. Qualify host-path denial, upgrade survival and offline relaunch through the actual launcher. No per-launch root broker or automatic collector.
-2. **S2: second foreign ecosystem.** Qualify a pinned Arch or Void root with its own ABI and database. Package composition and lease-based GC are separate gates, not prerequisites for the full host.
-3. **S3: owned Linux host.** Dinit first, then s6-rc; real UEFI VM boot, generation journal and old-entry recovery, qualified service transitions and offline rollback. Do not alter the development machine's PID 1 to experiment.
-4. **Later gated work:** owned-host desktop/hardware, extended recovery/boot trust where justified, additional architectures, then separately qualified firmware targets. Firmware and fleet control are not part of this initial Linux milestone.
+1. **S2: second foreign ecosystem.** Qualify a pinned Arch or Void root with its own ABI and database. Package composition and lease-based GC are independent optional gates; retain-all is the working storage policy.
+2. **S3: owned Linux host.** Dinit first, then s6-rc; real UEFI VM boot, generation journal and old-entry recovery, qualified service transitions and offline rollback. Do not alter the development machine's PID 1 to experiment.
+3. **Later gated work:** owned-host desktop/hardware, extended recovery/boot trust where justified, additional architectures, then separately qualified firmware targets. Firmware and fleet control are not part of this initial Linux milestone.
 
-Not implemented: publisher signature verification, the Misa application launcher/desktop exports/NixOS strata module, privileged host path opening, system-owned storage activation, host enrollment/approval, boot, init adapters, rollback, GC, firmware flashing or fleet deployment. No whole-host reproducibility, complete security-isolation, recovery or hardware-support claim follows from these checks.
+Not implemented: privileged host path opening, system-owned storage activation, host enrollment/approval, boot, init adapters, rollback, GC, automatic icon publishing, file-open field codes, firmware flashing or fleet deployment. No whole-host reproducibility, universal isolation, recovery or hardware-support claim follows from the S1 checks.
 
 ## Architecture provenance
 
