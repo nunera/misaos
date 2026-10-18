@@ -35,6 +35,20 @@ pub struct SecretKey {
     secret_seed: String,
 }
 
+impl SecretKey {
+    pub(crate) fn sign_message(&self, message: &[u8]) -> Result<[u8; 64]> {
+        if self.schema_version != SECRET_VERSION {
+            return Err(Error::new(
+                "E_TRUST",
+                "secretKey",
+                "unsupported secret-key record",
+            ));
+        }
+        let signing = SigningKey::from_bytes(&fixed_hex(&self.secret_seed, "secretKey")?);
+        Ok(signing.sign(message).to_bytes())
+    }
+}
+
 /// Possession proves admission of this exact lock by the caller-supplied trust key.
 /// The signer is the local operator, not an asserted upstream image publisher.
 pub struct AuthorizedLock {

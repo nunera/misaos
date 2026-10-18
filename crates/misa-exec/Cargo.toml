@@ -1,0 +1,20 @@
+[package]
+name = "misa-exec"
+description = "Retained-root verification and unprivileged bubblewrap launch for MisaOS strata exports"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+misa-plan = { path = "../misa-plan" }
+misa-image = { path = "../misa-image" }
+serde.workspace = true
+serde_json.workspace = true
+serde_jcs.workspace = true
+sha2.workspace = true
+rustix.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tar.workspace = true

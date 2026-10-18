@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/misa-plan", "crates/misa-image", "crates/misa-cli"]
+members = ["crates/misa-plan", "crates/misa-image", "crates/misa-exec", "crates/misa-cli"]
 resolver = "2"
 
 [workspace.package]

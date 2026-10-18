@@ -1,6 +1,7 @@
 //! Caller-owned retain-all storage. Permission sealing is not runtime isolation:
 //! the owner can chmod these caches; consumers still need a read-only/nosuid/nodev view.
 use crate::model::{self, Descriptor, Limits, LockedImage, decimal};
+use crate::publisher::{self, PublisherProof};
 use crate::tools::{self, Tools};
 use crate::trust::{self, AuthorizedLock};
 use crate::verify;
@@ -18,7 +19,7 @@ use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsE
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const METADATA_LIMIT: u64 = 8 * 1024 * 1024;
 
@@ -65,6 +66,8 @@ pub struct StoreStatus {
     pub retained_manifests: u64,
     #[serde(with = "decimal")]
     pub retained_receipts: u64,
+    #[serde(with = "decimal")]
+    pub qualified_publishers: u64,
     #[serde(with = "decimal")]
     pub retained_blob_bytes: u64,
     #[serde(with = "decimal")]
@@ -129,6 +132,7 @@ impl Store {
             "oci/blobs/sha256",
             "materialized",
             "receipts",
+            "publishers",
             "staging",
         ] {
             private_dir(&path.join(relative), uid)?;
@@ -342,65 +346,14 @@ impl Store {
         let mut checked_roots = BTreeSet::new();
         let mut checked_manifests = BTreeSet::new();
         for receipt in &status.receipts {
-            let evidence = self.path.join("receipts").join(receipt_id(receipt)?);
-            let lock =
-                model::parse_lock(&read_bounded(&evidence.join("lock.json"), METADATA_LIMIT)?)?;
-            let approval = trust::parse_approval(&read_bounded(
-                &evidence.join("approval.json"),
-                METADATA_LIMIT,
-            )?)?;
-            let key = trust::parse_public_key(&read_bounded(
-                &evidence.join("public-key.json"),
-                METADATA_LIMIT,
-            )?)?;
-            let authorized = trust::verify_approval(lock, approval, key)?;
-            let locked = authorized.lock().strata.get(&receipt.name).ok_or_else(|| {
-                state(
-                    "receipt.name",
-                    "receipt stratum is not in its signed lock; inspect evidence offline",
-                )
-            })?;
-            let verified = verify::verify_layout(
-                &self.path.join("oci"),
-                locked,
-                &authorized.lock().target_platform,
-            )?;
-            let root_dir = self
-                .path
-                .join("materialized")
-                .join(model::digest_hex(&locked.image.digest)?);
-            let root = root_dir.join("rootfs");
-            require_private_dir(&root_dir, rustix::process::geteuid().as_raw())?;
-            let materialization: Materialization =
-                read_json(&root_dir.join("materialization.json"))?;
-            // Different signed policies for one manifest are each checked above;
-            // the cache tree is likewise checked under each receipt's bounds.
-            verify_materialization(&materialization, &root, locked)?;
-            if receipt.schema_version != "misa.import/v1"
-                || receipt.qualification != "R1"
-                || receipt.storage_mode != "retain-all"
-                || receipt.seal_mode != "read-only-permissions"
-                || receipt.lock_digest != authorized.lock_digest()
-                || receipt.approval_digest
-                    != misa_plan::hash_bytes(&canonical(authorized.approval())?)
-                || receipt.key_id != authorized.approval().key_id
-                || receipt.manifest_digest != locked.image.digest
-                || receipt.tree_digest != materialization.tree_digest
-                || receipt.toolchain != materialization.toolchain
-                || receipt.root_path != path_string(&root)?
-                || receipt.oci_layout != path_string(&self.path.join("oci"))?
-                || receipt.expanded_bytes != verified.expanded_bytes
-                || receipt.entries != verified.entries
-                || receipt.stripped_modes != verified.stripped_modes
-            {
-                return Err(state(
-                    "receipt",
-                    "receipt disagrees with signed admission or verified artifacts; inspect retained evidence offline",
-                ));
-            }
-            checked_roots.insert(locked.image.digest.clone());
-            checked_manifests.insert(locked.image.digest.clone());
+            self.check_receipt(receipt)?;
+            checked_roots.insert(receipt.manifest_digest.clone());
+            checked_manifests.insert(receipt.manifest_digest.clone());
         }
+        // Publisher evidence is optional: legacy/Docker-official imports have none and
+        // are not corrupt for lacking it. Present evidence must verify offline and
+        // bind to a verified local receipt; the external keyring is a launch input.
+        self.check_publisher_proofs(&status.receipts)?;
         let index = read_index(&self.path.join("oci/index.json"))?;
         for descriptor in index["manifests"].as_array().expect("validated array") {
             if !checked_manifests.contains(descriptor["digest"].as_str().unwrap_or("")) {
@@ -451,6 +404,7 @@ impl Store {
             "oci/blobs/sha256",
             "materialized",
             "receipts",
+            "publishers",
             "staging",
         ] {
             require_private_dir(&self.path.join(relative), uid)?;
@@ -467,20 +421,7 @@ impl Store {
 
     fn status(&self) -> Result<StoreStatus> {
         self.validate_structure()?;
-        let mut receipts = Vec::new();
-        for directory in sorted_children(&self.path.join("receipts"))? {
-            require_private_dir(&directory, rustix::process::geteuid().as_raw())?;
-            let receipt: ImportReceipt = read_json(&directory.join("receipt.json"))?;
-            if directory.file_name().and_then(|s| s.to_str())
-                != Some(receipt_id(&receipt)?.as_str())
-            {
-                return Err(state(
-                    "receipt",
-                    "receipt location disagrees with its admission identity",
-                ));
-            }
-            receipts.push(receipt);
-        }
+        let receipts = self.receipts()?;
         let roots = sorted_children(&self.path.join("materialized"))?;
         let mut materialized_bytes = 0u64;
         for root in &roots {
@@ -512,11 +453,344 @@ impl Store {
                 .expect("validated array")
                 .len() as u64,
             retained_receipts: receipts.len() as u64,
+            qualified_publishers: sorted_children(&self.path.join("publishers"))?.len() as u64,
             retained_blob_bytes,
             materialized_bytes,
             incomplete_stages: sorted_children(&self.path.join("staging"))?.len() as u64,
             receipts,
         })
+    }
+
+    fn receipts(&self) -> Result<Vec<ImportReceipt>> {
+        let mut receipts = Vec::new();
+        for directory in sorted_children(&self.path.join("receipts"))? {
+            require_private_dir(&directory, rustix::process::geteuid().as_raw())?;
+            let receipt: ImportReceipt = read_json(&directory.join("receipt.json"))?;
+            if directory.file_name().and_then(|s| s.to_str())
+                != Some(receipt_id(&receipt)?.as_str())
+            {
+                return Err(state(
+                    "receipt",
+                    "receipt location disagrees with its admission identity",
+                ));
+            }
+            receipts.push(receipt);
+        }
+        Ok(receipts)
+    }
+
+    /// Re-verifies one local admission receipt's signed evidence, OCI bytes and tree.
+    fn check_receipt(&self, receipt: &ImportReceipt) -> Result<(AuthorizedLock, PathBuf)> {
+        let authorized = self.admission(receipt)?;
+        let locked = authorized.lock().strata.get(&receipt.name).ok_or_else(|| {
+            state(
+                "receipt.name",
+                "receipt stratum is not in its signed lock; inspect evidence offline",
+            )
+        })?;
+        let verified = verify::verify_layout(
+            &self.path.join("oci"),
+            locked,
+            &authorized.lock().target_platform,
+        )?;
+        let root_dir = self
+            .path
+            .join("materialized")
+            .join(model::digest_hex(&locked.image.digest)?);
+        let root = root_dir.join("rootfs");
+        require_private_dir(&root_dir, rustix::process::geteuid().as_raw())?;
+        let materialization: Materialization = read_json(&root_dir.join("materialization.json"))?;
+        // Different signed policies for one manifest are each checked here;
+        // the cache tree is likewise checked under each receipt's bounds.
+        verify_materialization(&materialization, &root, locked)?;
+        if receipt.schema_version != "misa.import/v1"
+            || receipt.qualification != "R1"
+            || receipt.storage_mode != "retain-all"
+            || receipt.seal_mode != "read-only-permissions"
+            || receipt.lock_digest != authorized.lock_digest()
+            || receipt.approval_digest != misa_plan::hash_bytes(&canonical(authorized.approval())?)
+            || receipt.key_id != authorized.approval().key_id
+            || receipt.manifest_digest != locked.image.digest
+            || receipt.tree_digest != materialization.tree_digest
+            || receipt.toolchain != materialization.toolchain
+            || receipt.root_path != path_string(&root)?
+            || receipt.oci_layout != path_string(&self.path.join("oci"))?
+            || receipt.expanded_bytes != verified.expanded_bytes
+            || receipt.entries != verified.entries
+            || receipt.stripped_modes != verified.stripped_modes
+        {
+            return Err(state(
+                "receipt",
+                "receipt disagrees with signed admission or verified artifacts; inspect retained evidence offline",
+            ));
+        }
+        Ok((authorized, root))
+    }
+
+    /// Cheap signed-admission check of one receipt (no OCI/tree hashing).
+    fn admission(&self, receipt: &ImportReceipt) -> Result<AuthorizedLock> {
+        let evidence = self.path.join("receipts").join(receipt_id(receipt)?);
+        let lock = model::parse_lock(&read_bounded(&evidence.join("lock.json"), METADATA_LIMIT)?)?;
+        let approval = trust::parse_approval(&read_bounded(
+            &evidence.join("approval.json"),
+            METADATA_LIMIT,
+        )?)?;
+        let key = trust::parse_public_key(&read_bounded(
+            &evidence.join("public-key.json"),
+            METADATA_LIMIT,
+        )?)?;
+        trust::verify_approval(lock, approval, key)
+    }
+
+    /// Receipts that the signed local lock ties to this proof's source and platform.
+    /// A publisher key identical to any local admission key for the same stratum and
+    /// manifest is rejected: a local approval must never be relabeled as publisher proof.
+    fn bound_receipts<'a>(
+        &self,
+        receipts: &'a [ImportReceipt],
+        proof: &PublisherProof,
+        publisher_key: &[u8; 32],
+    ) -> Result<Vec<&'a ImportReceipt>> {
+        let mut matched = Vec::new();
+        for receipt in receipts
+            .iter()
+            .filter(|r| r.name == proof.name && r.manifest_digest == proof.manifest_digest)
+        {
+            let authorized = self.admission(receipt)?;
+            if publisher::decode_public_key(&authorized.public_key().public_key)? == *publisher_key
+            {
+                return Err(Error::new(
+                    "E_TRUST",
+                    "publisher.key",
+                    "publisher key equals the local admission key; local approval is not publisher authentication",
+                ));
+            }
+            let locked = authorized.lock().strata.get(&receipt.name).ok_or_else(|| {
+                state(
+                    "receipt.name",
+                    "receipt stratum is not in its signed lock; inspect evidence offline",
+                )
+            })?;
+            if locked.source == proof.source && authorized.lock().target_platform == proof.platform
+            {
+                matched.push(receipt);
+            }
+        }
+        if matched.is_empty() {
+            return Err(Error::new(
+                "E_TRUST",
+                "publisher.binding",
+                "no retained local receipt matches this stratum name, source, platform and manifest",
+            ));
+        }
+        Ok(matched)
+    }
+
+    fn proof_dir(&self, proof: &PublisherProof) -> Result<PathBuf> {
+        Ok(self.path.join("publishers").join(proof_id(
+            &proof.name,
+            &proof.manifest_digest,
+            &proof.key_id,
+        )?))
+    }
+
+    /// Reads and offline-verifies one retained publisher proof directory.
+    fn read_proof(&self, id: &str) -> Result<(PublisherProof, [u8; 32])> {
+        let directory = self.path.join("publishers").join(id);
+        require_private_dir(&directory, rustix::process::geteuid().as_raw())?;
+        let proof: PublisherProof = read_json(&directory.join("proof.json"))?;
+        publisher::validate_proof(&proof)?;
+        if proof_id(&proof.name, &proof.manifest_digest, &proof.key_id)? != id {
+            return Err(state(
+                "publisher.proof",
+                "proof location disagrees with its identity",
+            ));
+        }
+        let statement = publisher::parse_statement(&read_bounded(
+            &directory.join("statement.json"),
+            METADATA_LIMIT,
+        )?)?;
+        let key = publisher::check_proof(&proof, &statement)?;
+        check_bytes(&directory.join("statement.json"), &canonical(&statement)?)?;
+        Ok((proof, key))
+    }
+
+    fn check_publisher_proofs(&self, receipts: &[ImportReceipt]) -> Result<()> {
+        for directory in sorted_children(&self.path.join("publishers"))? {
+            let id = directory
+                .file_name()
+                .and_then(|s| s.to_str())
+                .ok_or_else(|| state("publisher.proof", "non-UTF8 proof name"))?;
+            let (proof, key) = self.read_proof(id)?;
+            self.bound_receipts(receipts, &proof, &key)?;
+        }
+        Ok(())
+    }
+
+    /// Persists immutable publisher proof for an exact imported name/source/manifest.
+    /// The statement must already be verified against an external keyring; nothing is
+    /// inferred from local admission and an existing different proof is never replaced.
+    pub fn qualify_publisher(
+        &self,
+        verified: &publisher::VerifiedStatement,
+        name: &str,
+        source: &str,
+        manifest_digest: &str,
+    ) -> Result<PublisherProof> {
+        let _guard = self
+            .gate
+            .lock()
+            .map_err(|_| state("store", "operation lock poisoned; reopen the store"))?;
+        self.validate_structure()?;
+        model::validate_name(name)?;
+        model::validate_source(source)?;
+        model::digest_hex(manifest_digest)?;
+        let statement = verified.statement();
+        if statement.source != source || statement.manifest_digest != manifest_digest {
+            return Err(Error::new(
+                "E_TRUST",
+                "statement.binding",
+                "publisher statement does not name this exact source and manifest digest",
+            ));
+        }
+        let key = publisher::decode_public_key(&verified.key().public_key)?;
+        let proof = PublisherProof {
+            schema_version: publisher::PROOF_VERSION.into(),
+            name: name.into(),
+            source: source.into(),
+            manifest_digest: manifest_digest.into(),
+            platform: statement.platform.clone(),
+            key_id: statement.key_id.clone(),
+            public_key: verified.key().public_key.clone(),
+            key_fingerprint: publisher::fingerprint(&key),
+            statement_digest: publisher::statement_digest(statement)?,
+        };
+        let receipts = self.receipts()?;
+        for receipt in self.bound_receipts(&receipts, &proof, &key)? {
+            self.check_receipt(receipt)?;
+        }
+        let statement_bytes = canonical(statement)?;
+        let target = self.proof_dir(&proof)?;
+        if exists(&target)? {
+            let retained = self.read_proof(
+                target
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .ok_or_else(|| state("publisher.proof", "non-UTF8 proof name"))?,
+            )?;
+            if retained.0 != proof {
+                return Err(state(
+                    "publisher.proof",
+                    "a different proof already exists; preserve it and inspect offline",
+                ));
+            }
+            return Ok(proof);
+        }
+        let stage = tempfile::Builder::new()
+            .prefix("publisher-")
+            .tempdir_in(self.path.join("staging"))
+            .map_err(|e| io_error("staging", e))?
+            .keep();
+        let candidate = stage.join("evidence");
+        private_dir(&candidate, rustix::process::geteuid().as_raw())?;
+        write_new(&candidate.join("proof.json"), &canonical(&proof)?)?;
+        write_new(&candidate.join("statement.json"), &statement_bytes)?;
+        sync_dir(&candidate)?;
+        rename_new(&candidate, &target)?;
+        sync_dir(&self.path.join("publishers"))?;
+        fs::remove_dir_all(&stage).map_err(|e| io_error("staging.cleanup", e))?;
+        sync_dir(&self.path.join("staging"))?;
+        Ok(proof)
+    }
+
+    /// Returns the sealed rootfs only for publisher-qualified roots; never mutates.
+    pub fn launch_root(
+        &self,
+        manifest_digest: &str,
+        source_lock_key: &str,
+        publisher_key_id: &str,
+        keyring: &Path,
+    ) -> Result<PathBuf> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| Error::new("E_TRUST", "clock", "system clock precedes the Unix epoch"))?
+            .as_secs();
+        self.launch_root_at(
+            manifest_digest,
+            source_lock_key,
+            publisher_key_id,
+            keyring,
+            now,
+        )
+    }
+
+    /// `launch_root` with an explicit clock for deterministic tests and callers that
+    /// enforce their own trusted time floor.
+    pub fn launch_root_at(
+        &self,
+        manifest_digest: &str,
+        source_lock_key: &str,
+        publisher_key_id: &str,
+        keyring: &Path,
+        now_unix_seconds: u64,
+    ) -> Result<PathBuf> {
+        let _guard = self
+            .gate
+            .lock()
+            .map_err(|_| state("store", "operation lock poisoned; reopen the store"))?;
+        self.validate_structure()?;
+        model::digest_hex(manifest_digest)?;
+        model::validate_name(source_lock_key)?;
+        publisher::validate_key_id(publisher_key_id)?;
+        let keyring_real = fs::canonicalize(keyring).map_err(|_| {
+            Error::new(
+                "E_TRUST",
+                "keyring",
+                "pinned publisher keyring is unavailable",
+            )
+        })?;
+        let store_real = fs::canonicalize(&self.path).map_err(|e| io_error("store.path", e))?;
+        if keyring_real.starts_with(&store_real) {
+            return Err(Error::new(
+                "E_TRUST",
+                "keyring",
+                "the publisher keyring must be pinned outside the user-controlled store",
+            ));
+        }
+        let pinned = publisher::load_key_record(keyring, publisher_key_id)?;
+        publisher::check_usable(&pinned, now_unix_seconds)?;
+        let id = proof_id(source_lock_key, manifest_digest, publisher_key_id)?;
+        if !exists(&self.path.join("publishers").join(&id))? {
+            return Err(Error::new(
+                "E_TRUST",
+                "publisher.proof",
+                "no publisher proof is retained for this stratum, manifest and key; unsigned or locally approved roots are not launch-qualified",
+            ));
+        }
+        let (proof, retained_key) = self.read_proof(&id)?;
+        if proof.name != source_lock_key
+            || proof.manifest_digest != manifest_digest
+            || proof.key_id != publisher_key_id
+        {
+            return Err(state(
+                "publisher.proof",
+                "retained proof does not match the requested root",
+            ));
+        }
+        if publisher::decode_public_key(&pinned.public_key)? != retained_key {
+            return Err(Error::new(
+                "E_TRUST",
+                "publisher.key",
+                "pinned key differs from the key that signed the retained statement",
+            ));
+        }
+        let receipts = self.receipts()?;
+        let mut root = None;
+        for receipt in self.bound_receipts(&receipts, &proof, &retained_key)? {
+            let (_, path) = self.check_receipt(receipt)?;
+            root.get_or_insert(path);
+        }
+        root.ok_or_else(|| state("publisher.binding", "no verified local root"))
     }
 }
 
@@ -992,7 +1266,7 @@ fn owned_regular(file: &File, field: &str, uid: u32) -> Result<()> {
     Ok(())
 }
 
-fn open_directory(path: &Path) -> Result<File> {
+pub(crate) fn open_directory(path: &Path) -> Result<File> {
     let fd = rustix::fs::open(
         path,
         OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
@@ -1028,7 +1302,7 @@ fn confined_node(root: &File, relative: &Path, directory: bool) -> Result<File> 
     Ok(file)
 }
 
-fn confined_file(root: &File, relative: &Path) -> Result<File> {
+pub(crate) fn confined_file(root: &File, relative: &Path) -> Result<File> {
     confined_node(root, relative, false)
 }
 
@@ -1128,7 +1402,7 @@ fn exists(path: &Path) -> Result<bool> {
         Err(e) => Err(io_error("path", e)),
     }
 }
-fn read_handle(mut file: File, limit: u64, field: &str) -> Result<Vec<u8>> {
+pub(crate) fn read_handle(mut file: File, limit: u64, field: &str) -> Result<Vec<u8>> {
     if !file.metadata().map_err(|e| io_error(field, e))?.is_file() {
         return Err(state(field, "expected regular metadata file"));
     }
@@ -1259,6 +1533,14 @@ fn toolchain(tools: &Tools) -> Result<Toolchain> {
         umoci: path_string(&tools.umoci)?,
         bwrap: path_string(&tools.bwrap)?,
     })
+}
+fn proof_id(name: &str, manifest_digest: &str, key_id: &str) -> Result<String> {
+    Ok(format!(
+        "{}-{:x}-{:x}",
+        model::digest_hex(manifest_digest)?,
+        Sha256::digest(name.as_bytes()),
+        Sha256::digest(key_id.as_bytes())
+    ))
 }
 fn receipt_id(receipt: &ImportReceipt) -> Result<String> {
     Ok(format!(

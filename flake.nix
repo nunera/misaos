@@ -1,5 +1,5 @@
 {
-  description = "MisaOS: strict plans and locally approved, retained OCI roots";
+  description = "MisaOS: strict plans and standalone, publisher-qualified OCI strata on stock NixOS";
 
   # Explicit updates only; this revision is from the stable nixos-26.05 branch.
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/6fcc160353f63555b560f25588925133c8f61f2a";
@@ -11,10 +11,30 @@
       planLib = import ./nix/lib.nix {
         getTool = system: self.packages.${system}.misa;
       };
+      strataFixtureDeclaration = builtins.fromJSON (builtins.readFile ./fixtures/strata.json);
+      # S1 module-test plan: the synthetic fixture export with a desktop
+      # record and a distinct host CLI name, for exercising desktop
+      # rendering. Still synthetic: no artifact qualification is claimed.
+      strataDesktopFixtureDeclaration = strataFixtureDeclaration // {
+        exports = [
+          (builtins.head strataFixtureDeclaration.exports // {
+            name = "hello-desktop";
+            desktop = {
+              id = "misa-strata-desktop-fixture.desktop";
+              entryDigest = "sha256:" + builtins.hashString "sha256" "misa-strata-desktop-fixture";
+              icons = [ ];
+              mime = [ "application/vnd.misa.strata-fixture" ];
+              dbusName = null;
+            };
+          })
+        ];
+      };
     in {
       lib = {
         inherit (planLib) mkStrataPlan mkHostPlan;
       };
+
+      nixosModules.strata = import ./nix/strata-module.nix;
 
       packages = forAllSystems (system:
         let
@@ -31,6 +51,11 @@
             inherit pkgs;
             name = "misa-s0-plan-fixture";
             declaration = builtins.fromJSON (builtins.readFile ./fixtures/plan.json);
+          };
+          strata-desktop-fixture = planLib.mkStrataPlan {
+            inherit pkgs;
+            name = "misa-s1-strata-desktop-fixture";
+            declaration = strataDesktopFixtureDeclaration;
           };
           generation-fixture = planLib.mkRecord "generation" {
             inherit pkgs;
@@ -53,7 +78,7 @@
           pkgs = import nixpkgs { inherit system; };
           packages = self.packages.${system};
         in {
-          inherit (packages) strata-fixture plan-fixture generation-fixture wire-fixture;
+          inherit (packages) strata-fixture strata-desktop-fixture plan-fixture generation-fixture wire-fixture;
           s0 = pkgs.runCommand "misa-s0-conformance" {
             nativeBuildInputs = [ pkgs.python3 ];
           } ''
@@ -67,6 +92,21 @@
             mkdir -p "$out"
             printf '%s\n' 'S0 schema and identity conformance only; no VM or activation.' > "$out/scope"
           '';
+          strata-module = import ./nix/strata-tests.nix {
+            inherit nixpkgs pkgs system;
+            strataModule = self.nixosModules.strata;
+            misa = packages.misa;
+            strataFixture = packages.strata-fixture;
+            strataDesktopFixture = packages.strata-desktop-fixture;
+            planFixture = packages.plan-fixture;
+          };
+        } // nixpkgs.lib.optionalAttrs (system == "x86_64-linux" && builtins.pathExists ./tests/vm/s1.nix) {
+          # Stock-NixOS CLI/desktop, upgrade-survival and offline-relaunch VM gate.
+          s1 = import ./tests/vm/s1.nix {
+            inherit pkgs;
+            misa = packages.misa;
+            strataModule = self.nixosModules.strata;
+          };
         });
 
       devShells = forAllSystems (system:

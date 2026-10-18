@@ -1,7 +1,10 @@
 //! Unprivileged S1 image admission and retained storage, not host activation.
 //! An operator signature authorizes exact locked bytes; it is not a publisher signature.
+//! Publisher authentication (`publisher`) is a separate authority with its own domain,
+//! an externally pinned keyring and persisted per-manifest proof.
 
 pub mod model;
+pub mod publisher;
 pub mod resolve;
 pub mod store;
 pub mod tools;

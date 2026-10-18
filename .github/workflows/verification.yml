@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   plans-and-images:
-    name: Strict plans, signed image admission and retained storage
+    name: S0/S1 plans, signed OCI roots and stock-NixOS VM
     # 24.04 denies the pinned bwrap's namespace setup (Ubuntu bug 2069526).
     # Keep every runtime test and the sandbox intact; never disable host policy.
     runs-on: ubuntu-22.04
@@ -22,7 +22,7 @@ jobs:
         uses: nixbuild/nix-quick-install-action@2c9db80fb984ceb1bcaa77cdda3fdf8cfba92035 # v34
         with:
           nix_version: "2.29.2"
-          enable_kvm: false
+          enable_kvm: true
           nix_conf: |
             experimental-features = nix-command flakes
             accept-flake-config = false
@@ -30,7 +30,7 @@ jobs:
         run: |
           nix develop --no-update-lock-file --no-write-lock-file "path:$PWD" \
             --command cargo test --workspace --locked --target-dir "$RUNNER_TEMP/misaos-target"
-      - name: Check Nix-produced schema fixtures
+      - name: Check Nix plans, strata module and S1 VM
         run: |
           nix flake check --no-update-lock-file --no-write-lock-file "path:$PWD"
       - name: Run the S0 showcase without a VM
