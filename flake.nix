@@ -100,9 +100,15 @@
             strataDesktopFixture = packages.strata-desktop-fixture;
             planFixture = packages.plan-fixture;
           };
-        } // nixpkgs.lib.optionalAttrs (system == "x86_64-linux" && builtins.pathExists ./tests/vm/s1.nix) {
+        } // nixpkgs.lib.optionalAttrs (system == "x86_64-linux") {
           # Stock-NixOS CLI/desktop, upgrade-survival and offline-relaunch VM gate.
           s1 = import ./tests/vm/s1.nix {
+            inherit pkgs;
+            misa = packages.misa;
+            strataModule = self.nixosModules.strata;
+          };
+          # Second ecosystem: Void musl beside Debian in one merged lockset and plan.
+          s2 = import ./tests/vm/s2.nix {
             inherit pkgs;
             misa = packages.misa;
             strataModule = self.nixosModules.strata;

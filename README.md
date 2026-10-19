@@ -2,7 +2,7 @@
 
 Declarative Linux hosts and isolated foreign application roots, following **MisaOS Architecture and Implementation Contract, baseline 1.4**.
 
-**Implemented: S0 wire contracts and the S1 standalone strata path on stock NixOS.** `misa-plan` validates plans; `misa` admits, imports, qualifies, checks and launches declared foreign exports from retained OCI roots. `nixosModules.strata` renders per-user CLI wrappers and desktop entries from a validated immutable plan. It does not own the host bootloader, init, accounts, services or Nix store; every import and application launch runs as an ordinary user.
+**Implemented: S0 wire contracts, the S1 standalone strata path on stock NixOS, and the S2 second-ecosystem slice (Void musl beside Debian).** `misa-plan` validates plans; `misa` admits, imports, qualifies, checks and launches declared foreign exports from retained OCI roots, and merges reviewed locks into one lockset for multi-root plans. `nixosModules.strata` renders per-user CLI wrappers and desktop entries from a validated immutable plan. It does not own the host bootloader, init, accounts, services or Nix store; every import and application launch runs as an ordinary user.
 
 ## Run it
 
@@ -32,7 +32,7 @@ cargo test --workspace --locked
 
 The Nix package is `.#misa` (also the default); it installs both binaries and pins `skopeo`, `umoci` and `bubblewrap` to the existing Nixpkgs revision. Run imports as an ordinary user, never with `sudo`. Linux `openat2`, unprivileged user/mount/PID/network namespaces and xattr-capable storage are required; there is no weaker extraction fallback.
 
-`examples/debian-bookworm.lock.json` and `examples/debian-trixie.lock.json` are **real linux/amd64 candidate locks**, unlike `fixtures/`. Each pins the original multi-architecture index and the exact selected OCI manifest. Review the source and descriptors before approving a lock.
+`examples/debian-bookworm.lock.json`, `examples/debian-trixie.lock.json` and `examples/void-musl.lock.json` are **real linux/amd64 candidate locks**, unlike `fixtures/`. Each pins the original multi-architecture index and the exact selected OCI manifest; the Void lock pins `ghcr.io/void-linux/void-musl:20261001R1` and declares `libcFamily: "musl"`. Review the source and descriptors before approving a lock.
 
 ```sh
 tool=./result/bin/misa
@@ -86,6 +86,20 @@ Import `misa.nixosModules.strata` in a stock NixOS configuration. Set `misa.stra
 
 For a qualified root, `misa run --plan /nix/store/.../strata.json --store /home/USER/.../roots --export EXPORT --publisher-keyring /nix/store/.../keyring [-- ARG...]` checks the plan, declared grants, retained receipt and publisher proof; it then runs the exact argument vector unprivileged using pinned bubblewrap. The plan and keyring are immutable Nix outputs in module-generated wrappers. X11, Wayland and session-bus sockets require explicit grants; the VM acceptance cell uses a Debian xclock X11 desktop entry in an IceWM session. Desktop entries deliberately provide no host icon copy or `%f`/`%U` field code in S1; file-open associations and icon publishing are not qualified. A plain official Debian base image without an independent publisher statement remains an import-only example, not a runnable export.
 
+## Second ecosystem: Void musl beside Debian
+
+A plan records one `inputs.foreignLockDigest`, and the launcher requires it to equal the admitted lock of the exported root. A plan exporting from several roots therefore binds one **lockset** containing all of them:
+
+```sh
+"$tool" strata merge-locks --lock debian.lock.json --lock examples/void-musl.lock.json --output lockset.lock.json
+```
+
+`merge-locks` copies every entry unchanged, refuses a stratum name that occurs in more than one input and refuses inputs with different `targetPlatform`s; the lockset identity is independent of input order. It is a new lock: approve it separately (an approval of an input does not admit it), then import each name under it. A root that is already retained is re-verified rather than re-fetched (`--offline`), keeps its materialization, and gains a second receipt beside the original one. Publisher proofs bind name, manifest and key, not the lock, so an existing proof stays valid.
+
+The importer, preflight and launcher needed no ecosystem-specific code for Void: its official layers are gzip OCI layers without capabilities or xattrs, and the loader check recognizes `ld-musl-*`. At launch, a glibc ELF inside the musl root fails with `E_ABI` before execution; there is no `gcompat`-style fallback. Each root reads only its own package database (`dpkg` under `/var/lib/dpkg`, `xbps` under `/var/db/xbps`); neither database nor manager is visible from the other root or written on the host.
+
+**Void qualification is pinned image only.** The official Void image carries no publisher statement, and Void keeps no dated public package archive, so this slice composes no xbps packages. The S2 VM derives an image from the pinned Void base by appending one fixture layer (probe, release marker and Debian's `/usr/bin/true` as the foreign glibc ELF), signed by the same independent fixture publisher as S1. The unmodified official Void image stays importable but unlaunchable. In the Debian fixture, the S1 x11-apps payload is extracted without dpkg registration, so `dpkg-query` reports the base image's database; database-to-file ownership belongs to the separate package-composition gate.
+
 
 ## S0 plan contracts
 
@@ -136,6 +150,7 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 nix flake check --no-update-lock-file --no-write-lock-file .
 tests/vm/s0.sh
 tests/vm/s1.sh
+tests/vm/s2.sh
 ```
 
 Run Rust checks inside `nix develop` so the real extraction tests receive `MISA_TEST_SKOPEO`, `MISA_TEST_UMOCI` and `MISA_TEST_BWRAP`. Without those variables, or under UID 0, the runtime storage cases explicitly skip; a passing sandboxed Nix build alone is not rootless-runtime evidence. GitHub Actions runs these tests outside the Nix build sandbox with the pinned tools.
@@ -148,6 +163,8 @@ The image suite covers signature/lock substitution, descriptor/platform/diff-ID 
 
 The S1 VM needs local KVM and fixed-output network fetches **before** boot, for the digest-pinned Debian base and SHA-256-pinned snapshot packages. The VM itself has no registry access. A passing fixture run proves this exact x86_64 stock-NixOS/Nixpkgs cell, not independent byte-for-byte image rebuilds, another compositor, publisher identity for official Debian, the aarch64 flake output or hardware qualification.
 
+`tests/vm/s2.sh` is the S2 ecosystem gate, built the same two-stage way with the S1 Debian release-1 image and the Void-musl-derived fixture. It boots with a Debian-only plan, admits and launches that root and keeps a process running, then grows the lockset. The single-lock approval is refused for the merged lockset. Debian is re-verified offline and Void imported beside it, and admission writes no host `/etc`, `/usr` or Nix-database change. Activating the two-ecosystem plan leaves the old process on its root. Each root's own manager lists exactly the database recorded from its image layers, and neither sees the other's database. The Void process maps only Void's musl `libc.so`. The glibc ELF in the musl root fails with `E_ABI`, and the unmodified official Void image stays unlaunchable. Launches write no host path either; after reboot, every root, receipt and proof is retained and both ecosystems relaunch offline. It adds the digest-pinned Void base to the pre-boot fetches; it does not qualify xbps package composition, publisher identity for official Void, or Void glibc.
+
 ## Code map
 
 | Path | Responsibility |
@@ -155,12 +172,12 @@ The S1 VM needs local KVM and fixed-output network fetches **before** boot, for 
 | `crates/misa-plan/` | Strict parser, closed-schema validation, semantic invariants, canonical identities and conformance tests |
 | `crates/misa-image/` | Foreign locks, local admission, independent publisher qualification, OCI verification, retained storage and offline integrity checks |
 | `crates/misa-exec/` | Strict export selection, ABI preflight and attested unprivileged execution view |
-| `crates/misa-cli/` | `misa-plan` inspection and `misa` import, qualification and launch commands |
+| `crates/misa-cli/` | `misa-plan` inspection and `misa` lock resolution/merging, import, qualification and launch commands |
 | `schemas/` | Published schemas and their deterministic Python generator |
 | `fixtures/` | Synthetic records and byte-level acceptance/rejection vectors |
-| `examples/` | Real digest-pinned Debian candidate locks; no secret keys or operator approvals |
+| `examples/` | Real digest-pinned Debian and Void musl candidate locks; no secret keys or operator approvals |
 | `nix/`, `flake.nix`, `flake.lock` | Pinned packaging, declaration constructors, NixOS strata module and cross-language checks |
-| `tests/vm/s0.sh`, `tests/vm/s1.sh` | S0 conformance showcase and stock-NixOS S1 acceptance VM |
+| `tests/vm/` | S0 conformance showcase (`s0.sh`), stock-NixOS S1 and S2 acceptance VMs (`s1.sh`, `s2.sh`) and their shared fixture builders |
 | `.github/workflows/verification.yml` | Rust, Nix and VM checks with pinned dependencies |
 
 `python3 schemas/generate.py` regenerates the schemas and synthetic record fixtures. Shared nested definitions have one generator source; generated schemas contain only reachable definitions and need no network resolution. The generator's fixture hashing is intentionally restricted to ASCII property names and safe integers; general JCS encoding belongs to the Rust implementation. `fixtures/wire.json` is the independent golden corpus and is not regenerated by that script.
@@ -169,11 +186,11 @@ Named-but-unspecified nested types in the PDF have conservative concrete layouts
 
 ## Next implementation sequence
 
-1. **S2: second foreign ecosystem.** Qualify a pinned Arch or Void root with its own ABI and database. Package composition and lease-based GC are independent optional gates; retain-all is the working storage policy.
+1. **S2 optional gates, only if wanted.** Package composition (Debian snapshot first, then a pacman/xbps composer as an independently gated manager pair) and opt-in `leased-gc` behind STR-17. Neither is required by S3; retain-all is the working storage policy.
 2. **S3: owned Linux host.** Dinit first, then s6-rc; real UEFI VM boot, generation journal and old-entry recovery, qualified service transitions and offline rollback. Do not alter the development machine's PID 1 to experiment.
 3. **Later gated work:** owned-host desktop/hardware, extended recovery/boot trust where justified, additional architectures, then separately qualified firmware targets. Firmware and fleet control are not part of this initial Linux milestone.
 
-Not implemented: privileged host path opening, system-owned storage activation, host enrollment/approval, boot, init adapters, rollback, GC, automatic icon publishing, file-open field codes, firmware flashing or fleet deployment. No whole-host reproducibility, universal isolation, recovery or hardware-support claim follows from the S1 checks.
+Not implemented: package composition, privileged host path opening, system-owned storage activation, host enrollment/approval, boot, init adapters, rollback, GC, automatic icon publishing, file-open field codes, firmware flashing or fleet deployment. No whole-host reproducibility, universal isolation, recovery or hardware-support claim follows from the S1 and S2 checks.
 
 ## Architecture provenance
 
