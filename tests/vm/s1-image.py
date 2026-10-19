@@ -12,42 +12,19 @@ independent key, by `misa strata publisher-sign`; the official Docker image carr
 no publisher signature and none is invented for it.
 """
 import argparse
-import gzip
-import hashlib
 import io
 import json
 import os
 import posixpath
-import shutil
 import sys
 import tarfile
+
+from ocifixture import Tree, canonical, drop_staging, publish, read_base, sha256, stage_layer, write_lock
 
 # Official Debian images use the debuerreotype epoch of the pinned manifest.
 EPOCH = 1791158400
 CREATED = "2026-10-05T00:00:00Z"
-OCI_MANIFEST = "application/vnd.oci.image.manifest.v1+json"
-OCI_CONFIG = "application/vnd.oci.image.config.v1+json"
-OCI_GZIP = "application/vnd.oci.image.layer.v1.tar+gzip"
-OCI_INDEX = "application/vnd.oci.image.index.v1+json"
 USR_MERGED = {"bin", "sbin", "lib", "lib32", "lib64", "libx32"}
-
-LIMITS = {
-    "maxBlobBytes": "536870912",
-    "maxEntries": 200000,
-    "maxExpandedBytes": "2147483648",
-    "maxExpansionRatio": 256,
-    "maxFileBytes": "536870912",
-    "maxPathBytes": 4096,
-    "timeoutSeconds": 300,
-}
-
-
-def canonical(value):
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-
-
-def sha256(data):
-    return hashlib.sha256(data).hexdigest()
 
 
 def relocate(path):
@@ -78,31 +55,6 @@ def deb_members(path):
             if size % 2:
                 handle.read(1)
             yield name, body
-
-
-class Tree:
-    """Merged file tree of the new layer: path -> entry dict."""
-
-    def __init__(self):
-        self.entries = {}
-
-    def add(self, path, entry, origin):
-        existing = self.entries.get(path)
-        if existing is not None:
-            if existing["kind"] == "dir" and entry["kind"] == "dir":
-                return
-            if existing == entry:
-                return
-            sys.exit(f"conflicting entries for {path}: {origin} vs previous")
-        self.entries[path] = entry
-
-    def directory(self, path, origin="fixture"):
-        self.add(path, {"kind": "dir", "mode": 0o755}, origin)
-
-    def file(self, path, data, mode=0o644, origin="fixture"):
-        if isinstance(data, str):
-            data = data.encode()
-        self.add(path, {"kind": "file", "mode": mode, "data": data}, origin)
 
 
 def read_deb(tree, path):
@@ -149,93 +101,6 @@ def read_deb(tree, path):
                 sys.exit(f"{path}: unsupported member type for {original}")
 
 
-def write_layer(tree):
-    """Deterministic GNU tar (no PAX), root-owned, fixed mtime, parents sorted first."""
-    buffer = io.BytesIO()
-    with tarfile.open(fileobj=buffer, mode="w", format=tarfile.GNU_FORMAT) as archive:
-        for path in sorted(tree.entries):
-            entry = tree.entries[path]
-            info = tarfile.TarInfo(path)
-            info.mtime = EPOCH
-            info.uid = info.gid = 0
-            info.uname = info.gname = ""
-            info.mode = entry["mode"]
-            if entry["kind"] == "dir":
-                info.type = tarfile.DIRTYPE
-                archive.addfile(info)
-            elif entry["kind"] == "symlink":
-                info.type = tarfile.SYMTYPE
-                info.linkname = entry["link"]
-                archive.addfile(info)
-            else:
-                info.size = len(entry["data"])
-                archive.addfile(info, io.BytesIO(entry["data"]))
-    raw = buffer.getvalue()
-    packed = io.BytesIO()
-    with gzip.GzipFile(filename="", mode="wb", fileobj=packed, mtime=0, compresslevel=9) as stream:
-        stream.write(raw)
-    return raw, packed.getvalue()
-
-
-def read_blob(layout, digest):
-    with open(os.path.join(layout, "blobs", "sha256", digest.removeprefix("sha256:")), "rb") as handle:
-        return handle.read()
-
-
-def write_blob(layout, data):
-    digest = sha256(data)
-    with open(os.path.join(layout, "blobs", "sha256", digest), "wb") as handle:
-        handle.write(data)
-    return {"digest": "sha256:" + digest, "size": len(data)}
-
-
-def lock_for(name, source, manifest):
-    return {
-        "schemaVersion": 1,
-        "strata": {
-            name: {
-                "image": {
-                    "digest": manifest["digest"],
-                    "mediaType": OCI_MANIFEST,
-                    "size": str(manifest["size"]),
-                },
-                "libcFamily": "glibc",
-                "limits": LIMITS,
-                "source": source,
-            }
-        },
-        "targetPlatform": "linux/amd64",
-    }
-
-
-def publish(out, name, source, base_layout, config, layers):
-    """Write one complete OCI layout whose manifest has the given layer blobs."""
-    layout = os.path.join(out, name, "layout")
-    os.makedirs(os.path.join(layout, "blobs", "sha256"))
-    for layer in layers:
-        shutil.copyfile(
-            os.path.join(layer["from"], "blobs", "sha256", layer["digest"].removeprefix("sha256:")),
-            os.path.join(layout, "blobs", "sha256", layer["digest"].removeprefix("sha256:")),
-        )
-    config_descriptor = write_blob(layout, canonical(config))
-    manifest = {
-        "config": {"mediaType": OCI_CONFIG, **config_descriptor},
-        "layers": [
-            {"mediaType": layer["mediaType"], "digest": layer["digest"], "size": layer["size"]}
-            for layer in layers
-        ],
-        "mediaType": OCI_MANIFEST,
-        "schemaVersion": 2,
-    }
-    descriptor = write_blob(layout, canonical(manifest))
-    entry = {"mediaType": OCI_MANIFEST, **descriptor, "platform": {"architecture": "amd64", "os": "linux"}}
-    with open(os.path.join(layout, "oci-layout"), "wb") as handle:
-        handle.write(b'{"imageLayoutVersion":"1.0.0"}')
-    with open(os.path.join(layout, "index.json"), "wb") as handle:
-        handle.write(canonical({"manifests": [entry], "mediaType": OCI_INDEX, "schemaVersion": 2}))
-    with open(os.path.join(out, name, "lock.json"), "wb") as handle:
-        handle.write(canonical(lock_for(name, source, entry)))
-    return entry
 
 
 def main():
@@ -249,21 +114,13 @@ def main():
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
 
-    with open(os.path.join(args.base_layout, "index.json"), "rb") as handle:
-        base_index = json.load(handle)
-    base_descriptor = base_index["manifests"][0]
-    base_manifest = json.loads(read_blob(args.base_layout, base_descriptor["digest"]))
-    base_config = json.loads(read_blob(args.base_layout, base_manifest["config"]["digest"]))
+    base_descriptor, base_manifest, base_config = read_base(args.base_layout)
     if len(base_manifest["layers"]) != 1:
         sys.exit("the pinned Debian base is expected to have exactly one layer")
     os.makedirs(args.out)
 
     # The unmodified official image: only a lock, for the unsigned negative scenario.
-    os.makedirs(os.path.join(args.out, "debian-upstream"))
-    with open(os.path.join(args.out, "debian-upstream", "lock.json"), "wb") as handle:
-        handle.write(
-            canonical(lock_for("debian-upstream", "docker.io/library/debian", base_descriptor))
-        )
+    write_lock(args.out, "debian-upstream", "docker.io/library/debian", base_descriptor, "glibc")
 
     with open(args.debs_lock) as handle:
         debs = json.load(handle)
@@ -293,20 +150,7 @@ def main():
     layer2.file("usr/share/misa-fixture/.wh.v1-only", b"")
     layer2.file("etc/misa-fixture-release", "2\n")
 
-    layers = []
-    for number, tree in ((1, layer1), (2, layer2)):
-        raw, packed = write_layer(tree)
-        staging = os.path.join(args.out, f".layer{number}")
-        os.makedirs(os.path.join(staging, "blobs", "sha256"))
-        descriptor = write_blob(staging, packed)
-        layers.append(
-            {
-                **descriptor,
-                "mediaType": OCI_GZIP,
-                "from": staging,
-                "diffId": "sha256:" + sha256(raw),
-            }
-        )
+    layers = [stage_layer(args.out, str(number), tree, EPOCH) for number, tree in ((1, layer1), (2, layer2))]
     base_layer = {**base_manifest["layers"][0], "from": args.base_layout}
 
     def config_with(extra):
@@ -330,11 +174,10 @@ def main():
 
     summary = {
         "base": base_descriptor["digest"],
-        "v1": publish(args.out, "debian-desktop-v1", args.source, args.base_layout, config_with(layers[:1]), [base_layer, layers[0]]),
-        "v2": publish(args.out, "debian-desktop-v2", args.source, args.base_layout, config_with(layers), [base_layer, layers[0], layers[1]]),
+        "v1": publish(args.out, "debian-desktop-v1", args.source, config_with(layers[:1]), [base_layer, layers[0]], "glibc"),
+        "v2": publish(args.out, "debian-desktop-v2", args.source, config_with(layers), [base_layer, layers[0], layers[1]], "glibc"),
     }
-    for number in (1, 2):
-        shutil.rmtree(os.path.join(args.out, f".layer{number}"))
+    drop_staging(args.out)
     with open(os.path.join(args.out, "summary.json"), "wb") as handle:
         handle.write(canonical(summary))
 

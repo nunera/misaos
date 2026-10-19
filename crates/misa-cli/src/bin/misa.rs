@@ -121,6 +121,15 @@ enum Strata {
         #[arg(long)]
         offline: bool,
     },
+    /// Merge reviewed locks into one new lockset for a multi-root plan; approve the result separately.
+    MergeLocks {
+        /// An input lock; repeat for each. Every stratum name must occur exactly once.
+        #[arg(long = "lock", required = true)]
+        locks: Vec<PathBuf>,
+        /// Write a new canonical lock file; never overwrite an existing lock.
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
     /// Report all retained roots and disk-byte growth; does not verify contents.
     List {
         #[arg(long)]
@@ -379,6 +388,13 @@ fn run(command: Command) -> Result<()> {
                     }),
                     None,
                 )
+            }
+            Strata::MergeLocks { locks, output } => {
+                let locks = locks
+                    .iter()
+                    .map(|path| model::parse_lock(&read_record(path, false)?))
+                    .collect::<Result<Vec<_>>>()?;
+                emit(&model::merge_locks(locks)?, output.as_deref())
             }
             Strata::List { store } => emit(&Store::open(&store)?.list()?, None),
             Strata::Doctor { store } => {

@@ -48,6 +48,7 @@ let
   header = data: ''
     import json
     S1 = json.loads(${builtins.toJSON (builtins.toJSON data)})
+    FIXTURE = S1
   '';
 
   operator = {

@@ -1,12 +1,12 @@
-# Helpers shared by the S1 oracle and the S1 acceptance test scripts. They are
-# concatenated after a generated `S1 = json.loads(...)` header and run inside the
-# NixOS test driver, where `machine` and `subtest` are provided as globals.
+# Helpers shared by the S1 and S2 oracle and acceptance test scripts. They are
+# concatenated after a generated header that binds the test's record as `FIXTURE`,
+# and run inside the NixOS test driver, where `machine` and `subtest` are globals.
 import hashlib
 import json
 import re
 import shlex
 
-STORE = S1["store"]
+STORE = FIXTURE["store"]
 ADMISSION = "/home/alice/.config/misa/admission"
 SHARE = "/home/alice/misa-s1-share"
 
@@ -55,8 +55,8 @@ def install_operator_key():
     """The local operator's admission key, independent of the publisher's."""
     machine.succeed(
         f"install -d -m700 -o alice -g users /home/alice/.config /home/alice/.config/misa {ADMISSION}",
-        f"install -m600 -o alice -g users {S1['operator']['secret']} {ADMISSION}/secret.json",
-        f"install -m644 -o alice -g users {S1['operator']['public']} {ADMISSION}/public.json",
+        f"install -m600 -o alice -g users {FIXTURE['operator']['secret']} {ADMISSION}/secret.json",
+        f"install -m644 -o alice -g users {FIXTURE['operator']['public']} {ADMISSION}/public.json",
     )
 
 
@@ -64,13 +64,13 @@ def approve_and_import(name):
     """Locally approve the exact lock, then import its layout; return the import record."""
     base = f"/home/alice/.config/misa/{name}"
     alice(
-        f"misa strata approve --lock {S1['locks'][name]} "
+        f"misa strata approve --lock {FIXTURE['locks'][name]} "
         f"--secret-key {ADMISSION}/secret.json --output {base}.approval.json"
     )
     alice(
-        f"misa strata import --lock {S1['locks'][name]} --approval {base}.approval.json "
+        f"misa strata import --lock {FIXTURE['locks'][name]} --approval {base}.approval.json "
         f"--trusted-key {ADMISSION}/public.json --name {name} --store {STORE} "
-        f"--from-layout {S1['layouts'][name]} > {base}.import.json"
+        f"--from-layout {FIXTURE['layouts'][name]} > {base}.import.json"
     )
     return normalized_import(json.loads(machine.succeed(f"cat {base}.import.json")))
 
@@ -81,7 +81,7 @@ def reimport_offline(name):
     return normalized_import(
         json.loads(
             alice(
-                f"misa strata import --lock {S1['locks'][name]} --approval {base}.approval.json "
+                f"misa strata import --lock {FIXTURE['locks'][name]} --approval {base}.approval.json "
                 f"--trusted-key {ADMISSION}/public.json --name {name} --store {STORE} --offline"
             )
         )
