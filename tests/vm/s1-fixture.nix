@@ -65,7 +65,13 @@ let
   '';
   desktopEntry = pkgs.writeText "misa-s1-xclock.desktop" desktopText;
 
-  images = pkgs.runCommand "misa-s1-images" { nativeBuildInputs = [ pkgs.python3 ]; } ''
+  # Shared deterministic OCI writer, also used by the S2 Void fixture.
+  ociFixture = pkgs.writeTextDir "ocifixture.py" (builtins.readFile ./ocifixture.py);
+
+  images = pkgs.runCommand "misa-s1-images" {
+    nativeBuildInputs = [ pkgs.python3 ];
+    PYTHONPATH = "${ociFixture}";
+  } ''
     python3 ${./s1-image.py} \
       --base-layout ${baseLayout} \
       --debs-lock ${./s1-debs.lock.json} \
@@ -109,7 +115,7 @@ let
   summary = builtins.fromJSON (builtins.readFile "${images}/summary.json");
 in
 {
-  inherit baseLayout images keys statements summary desktopEntry publisherKeyId;
+  inherit baseLayout images keys statements summary desktopEntry publisherKeyId ociFixture;
   publisherPublicKey = (builtins.fromJSON (builtins.readFile "${keys}/publisher/public.json")).publicKey;
   desktopEntryDigest = "sha256:" + builtins.hashString "sha256" desktopText;
   # Layouts imported with `--from-layout`; the upstream layout is the unmodified Docker image.

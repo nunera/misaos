@@ -1,8 +1,8 @@
 #!/bin/sh
-# Fixture program shipped inside the publisher-signed, Debian-derived S1 image
-# (/usr/local/bin/misa-probe). It only reports what the foreign root observes
-# so tests/vm/s1.nix can assert real launcher behaviour; it is not part of any
-# Debian package.
+# Fixture program shipped inside the publisher-signed derived images: the S1
+# Debian image and the S2 Void musl image (/usr/local/bin/misa-probe). It only
+# reports what the foreign root observes so the VM tests can assert real
+# launcher behaviour; it is not part of any distribution package.
 set -u
 
 mode=${1:-identity}
@@ -13,7 +13,8 @@ fi
 case "$mode" in
   identity)
     printf 'release=%s\n' "$(cat /etc/misa-fixture-release)"
-    printf 'os=%s\n' "$(. /etc/os-release && printf '%s-%s' "$ID" "$VERSION_ID")"
+    # Rolling distributions such as Void define no VERSION_ID.
+    printf 'os=%s\n' "$(. /etc/os-release && printf '%s-%s' "$ID" "${VERSION_ID:-rolling}")"
     printf 'uid=%s\n' "$(id -u)"
     printf 'marker=%s\n' "$(ls /usr/share/misa-fixture | grep -- '-only$' | tr '\n' ',')"
     ;;
