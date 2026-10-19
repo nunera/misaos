@@ -130,6 +130,51 @@ pub fn lock_digest(lock: &ForeignLock) -> Result<String> {
     Ok(misa_plan::hash_bytes(&canonical_lock(lock)?))
 }
 
+/// Combine separately reviewed locks into one lockset, so one strata plan can bind
+/// roots from several ecosystems through a single `foreignLockDigest`. Entries are
+/// copied unchanged; a stratum name must occur in exactly one input, and every
+/// input must target the same platform. The result is a new lock: it needs its own
+/// local approval, and each root is re-imported (verified, not re-fetched) under it.
+pub fn merge_locks(locks: impl IntoIterator<Item = ForeignLock>) -> Result<ForeignLock> {
+    let mut locks = locks.into_iter();
+    let mut merged = locks
+        .next()
+        .ok_or_else(|| Error::new("E_LOCK", "locks", "merge at least two locks"))?;
+    let mut inputs = 1usize;
+    for lock in locks {
+        inputs += 1;
+        if lock.schema_version != merged.schema_version {
+            return Err(Error::new(
+                "E_SCHEMA",
+                "schemaVersion",
+                "merged locks must share one foreign-lock version",
+            ));
+        }
+        if lock.target_platform != merged.target_platform {
+            return Err(Error::new(
+                "E_ABI",
+                "targetPlatform",
+                "merged locks must target the same platform",
+            ));
+        }
+        for (name, image) in lock.strata {
+            if merged.strata.contains_key(&name) {
+                return Err(Error::new(
+                    "E_LOCK",
+                    "strata",
+                    "a stratum name occurs in more than one input lock",
+                ));
+            }
+            merged.strata.insert(name, image);
+        }
+    }
+    if inputs < 2 {
+        return Err(Error::new("E_LOCK", "locks", "merge at least two locks"));
+    }
+    validate_lock(&merged)?;
+    Ok(merged)
+}
+
 pub fn digest_hex(digest: &str) -> Result<&str> {
     let hex = digest
         .strip_prefix("sha256:")

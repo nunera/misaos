@@ -181,3 +181,65 @@ fn signature_is_independent_of_json_property_order_but_not_values() {
         approval.lock_digest
     );
 }
+
+fn musl_candidate() -> ForeignLock {
+    let mut lock = candidate();
+    let mut image = lock.strata.remove("debian").unwrap();
+    image.source = "registry.example.invalid/void-linux/void-musl".into();
+    image.image.digest = misa_plan::hash_bytes(b"second manifest identity");
+    image.libc_family = "musl".into();
+    lock.strata.insert("void-musl".into(), image);
+    lock
+}
+
+#[test]
+fn merged_lockset_keeps_each_entry_and_needs_its_own_approval() {
+    let (debian, void) = (candidate(), musl_candidate());
+    let merged = model::merge_locks([debian.clone(), void.clone()]).unwrap();
+    assert_eq!(
+        merged.strata.keys().collect::<Vec<_>>(),
+        ["debian", "void-musl"]
+    );
+    for (input, name) in [(&debian, "debian"), (&void, "void-musl")] {
+        assert_eq!(
+            serde_json::to_value(&merged.strata[name]).unwrap(),
+            serde_json::to_value(&input.strata[name]).unwrap()
+        );
+    }
+    // Input order does not change the lockset identity.
+    let reversed = model::merge_locks([void.clone(), debian.clone()]).unwrap();
+    assert_eq!(
+        model::lock_digest(&merged).unwrap(),
+        model::lock_digest(&reversed).unwrap()
+    );
+    // An approval of one input does not authorize the merged lockset.
+    let (secret, public) = key(21);
+    let approval = trust::approve(&debian, &secret).unwrap();
+    let error = trust::verify_approval(merged.clone(), approval, public.clone())
+        .err()
+        .unwrap();
+    assert_eq!(
+        (error.code, error.field),
+        ("E_TRUST", "approval.lockDigest".into())
+    );
+    let approval = trust::approve(&merged, &secret).unwrap();
+    trust::verify_approval(merged, approval, public).unwrap();
+}
+
+#[test]
+fn merging_refuses_ambiguous_or_cross_platform_locksets() {
+    let mut other_platform = musl_candidate();
+    other_platform.target_platform = "linux/arm64".into();
+    let mut renamed_debian = musl_candidate();
+    let image = renamed_debian.strata.remove("void-musl").unwrap();
+    renamed_debian.strata.insert("debian".into(), image);
+    let cases = [
+        (vec![candidate()], "E_LOCK"),
+        (vec![candidate(), candidate()], "E_LOCK"),
+        (vec![candidate(), renamed_debian], "E_LOCK"),
+        (vec![candidate(), other_platform], "E_ABI"),
+    ];
+    for (locks, code) in cases {
+        assert_eq!(model::merge_locks(locks).unwrap_err().code, code);
+    }
+}
