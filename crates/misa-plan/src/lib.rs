@@ -183,6 +183,28 @@ fn validate_value(value: &Value, domain: Domain) -> Result<()> {
     Ok(())
 }
 
+/// Closed-schema and semantic checks of one plan `serviceGraph` object, for init
+/// adapters that compile the graph before the plan naming their output exists.
+/// The full plan is still validated by [`validate`]; this is the same graph rule set.
+pub fn validate_service_graph(graph: &Value) -> Result<()> {
+    static GRAPH: LazyLock<jsonschema::Validator> = LazyLock::new(|| {
+        let plan: Value =
+            serde_json::from_str(Domain::Plan.schema()).expect("embedded schema is valid JSON");
+        let schema = serde_json::json!({
+            "$defs": plan["$defs"],
+            "$ref": "#/$defs/ServiceGraph",
+        });
+        jsonschema::validator_for(&schema).expect("embedded schema is valid JSON Schema")
+    });
+    if let Some(error) = GRAPH.iter_errors(graph).next() {
+        return Err(Error::schema(
+            format!("/serviceGraph{}", error.instance_path()),
+            "value does not satisfy the published schema",
+        ));
+    }
+    semantics::service_graph(graph)
+}
+
 struct GenerationBody<'a>(&'a serde_json::Map<String, Value>);
 
 impl Serialize for GenerationBody<'_> {
