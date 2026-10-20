@@ -1,0 +1,26 @@
+[package]
+name = "misa-service"
+description = "MisaOS portable service graph: capability negotiation, init adapter compilers and the misa-svcrun launcher"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "misa-service"
+path = "src/bin/misa-service.rs"
+
+[[bin]]
+name = "misa-svcrun"
+path = "src/bin/misa-svcrun.rs"
+
+[dependencies]
+misa-plan = { path = "../misa-plan" }
+serde.workspace = true
+serde_json.workspace = true
+serde_jcs.workspace = true
+sha2.workspace = true
+clap.workspace = true
+libc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

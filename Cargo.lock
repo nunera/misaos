@@ -604,6 +604,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "misa-activate"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "misa-plan",
+ "serde",
+ "serde_jcs",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
 name = "misa-cli"
 version = "0.1.0"
 dependencies = [
@@ -656,6 +669,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "misa-init"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "misa-plan",
+ "serde",
+ "serde_jcs",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
 name = "misa-plan"
 version = "0.1.0"
 dependencies = [
@@ -664,6 +690,20 @@ dependencies = [
  "serde_jcs",
  "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "misa-service"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "libc",
+ "misa-plan",
+ "serde",
+ "serde_jcs",
+ "serde_json",
+ "sha2",
+ "tempfile",
 ]
 
 [[package]]
