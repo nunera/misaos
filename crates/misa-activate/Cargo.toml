@@ -1,0 +1,21 @@
+[package]
+name = "misa-activate"
+description = "MisaOS host state transitions: BLS type 1 boot-entry publication and loader probing"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "misa-activate"
+path = "src/bin/misa-activate.rs"
+
+[dependencies]
+misa-plan = { path = "../misa-plan" }
+serde.workspace = true
+serde_json.workspace = true
+serde_jcs.workspace = true
+sha2.workspace = true
+clap.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -403,7 +403,7 @@ fn host(value: &Value) -> Result<()> {
     Ok(())
 }
 
-fn service_graph(graph: &Value) -> Result<()> {
+pub(crate) fn service_graph(graph: &Value) -> Result<()> {
     let nodes = array(graph, "services");
     set(
         nodes.iter().map(|v| text(v, "id")),

@@ -2,7 +2,7 @@
 
 Declarative Linux hosts and isolated foreign application roots, following **MisaOS Architecture and Implementation Contract, baseline 1.4**.
 
-**Implemented: S0 wire contracts, the S1 standalone strata path on stock NixOS, and the S2 second-ecosystem slice (Void musl beside Debian).** `misa-plan` validates plans; `misa` admits, imports, qualifies, checks and launches declared foreign exports from retained OCI roots, and merges reviewed locks into one lockset for multi-root plans. `nixosModules.strata` renders per-user CLI wrappers and desktop entries from a validated immutable plan. It does not own the host bootloader, init, accounts, services or Nix store; every import and application launch runs as an ordinary user.
+**Implemented: S0 wire contracts, the S1 standalone strata path on stock NixOS, the S2 second-ecosystem slice (Void musl beside Debian), and S3a, the first Misa-owned boot (UEFI, borrowed stage 1, verified handoff, Dinit as PID 1) in a VM.** `misa-plan` validates plans; `misa` admits, imports, qualifies, checks and launches declared foreign exports from retained OCI roots, and merges reviewed locks into one lockset for multi-root plans. `nixosModules.strata` renders per-user CLI wrappers and desktop entries from a validated immutable plan; it does not own the stock host's bootloader, init, accounts, services or Nix store, and every import and application launch runs as an ordinary user. The full-host path (`nix/host/`, `misa-service`, `misa-init`, `misa-activate`) builds and boots its own generations; it has no journal, rollback or live switching yet.
 
 ## Run it
 
@@ -100,6 +100,17 @@ The importer, preflight and launcher needed no ecosystem-specific code for Void:
 
 **Void qualification is pinned image only.** The official Void image carries no publisher statement, and Void keeps no dated public package archive, so this slice composes no xbps packages. The S2 VM derives an image from the pinned Void base by appending one fixture layer (probe, release marker and Debian's `/usr/bin/true` as the foreign glibc ELF), signed by the same independent fixture publisher as S1. The unmodified official Void image stays importable but unlaunchable. In the Debian fixture, the S1 x11-apps payload is extracted without dpkg registration, so `dpkg-query` reports the base image's database; database-to-file ownership belongs to the separate package-composition gate.
 
+## Owned host, S3a: first boot into Dinit
+
+`nix/host/` evaluates a full-host configuration with `lib.evalModules` over the `misa.*` namespace only; NixOS modules do not apply, and an unknown option is an evaluation error. One evaluation yields:
+
+- the portable service graph, validated by `misa-plan` (`validate_service_graph`) and compiled by `misa-service compile --adapter dinit` into one Dinit service file per node plus `misa.svcrun/v1` spec files. The tree's `tree.json` records the graph digest and the Dinit capability report for the pinned release; its SHA-256 is the generation's `adapterIdentity`. Compiling twice is byte-identical.
+- a host top level (`init` = `misa-handoff`, `init-tree`, `etc`, `sw`, kernel, modules, firmware), a real `misa.plan/v1` record and a `misa.generation/v1` manifest whose kernel, initrd and init digests and sizes are read from the built store files.
+- one of two borrowed stage-1 initrds: a reviewed adaptation of not-os's BusyBox stage 1 (commit `fa6ba60`, MIT; device names replaced by a `misa.root=` content selector, one ext4 root, a build-time resolved module list, `/run` carried into the new root), or NixOS 26.05's scripted stage 1 with `boot.initrd.systemd.enable = false`, which upstream deprecates and removes in 26.11.
+
+At boot, `misa-handoff` runs as PID 1 after `switch_root`. It strictly parses the `misa.*` command-line keys and checks the named generation against the mounted root (V1–V4, V6–V12; V5 has no borrowed counterpart). It confirms the mounted device by on-disk content (GPT partition GUID or ext4 UUID), writes `/run/misa/handoff.json`, points `/run/current-system` and `/run/misa/dinit/services` at the generation, and execs the pinned Dinit. Any failure prints one typed error and halts; an unverified init never runs.
+
+Every service runs through `misa-svcrun`: declared directories are created before the privilege drop, then the UID/GID are set with no supplementary groups and `no_new_privs`, and every descriptor except stdio and the declared readiness descriptor is closed. Dinit's `pipefd` accepts any byte as readiness, so `misa-svcrun` gives the service its own pipe and a detached relay forwards readiness only once a newline arrives (R2). `misa-activate publish` writes the BLS type 1 entry after its content-addressed blobs (B4), and `misa-activate loader-info` reads the running loader's Boot Loader Interface variables.
 
 ## S0 plan contracts
 
@@ -151,6 +162,7 @@ nix flake check --no-update-lock-file --no-write-lock-file .
 tests/vm/s0.sh
 tests/vm/s1.sh
 tests/vm/s2.sh
+tests/vm/s3a.sh
 ```
 
 Run Rust checks inside `nix develop` so the real extraction tests receive `MISA_TEST_SKOPEO`, `MISA_TEST_UMOCI` and `MISA_TEST_BWRAP`. Without those variables, or under UID 0, the runtime storage cases explicitly skip; a passing sandboxed Nix build alone is not rootless-runtime evidence. GitHub Actions runs these tests outside the Nix build sandbox with the pinned tools.
@@ -165,6 +177,22 @@ The S1 VM needs local KVM and fixed-output network fetches **before** boot, for 
 
 `tests/vm/s2.sh` is the S2 ecosystem gate, built the same two-stage way with the S1 Debian release-1 image and the Void-musl-derived fixture. It boots with a Debian-only plan, admits and launches that root and keeps a process running, then grows the lockset. The single-lock approval is refused for the merged lockset. Debian is re-verified offline and Void imported beside it, and admission writes no host `/etc`, `/usr` or Nix-database change. Activating the two-ecosystem plan leaves the old process on its root. Each root's own manager lists exactly the database recorded from its image layers, and neither sees the other's database. The Void process maps only Void's musl `libc.so`. The glibc ELF in the musl root fails with `E_ABI`, and the unmodified official Void image stays unlaunchable. Launches write no host path either; after reboot, every root, receipt and proof is retained and both ecosystems relaunch offline. It adds the digest-pinned Void base to the pre-boot fetches; it does not qualify xbps package composition, publisher identity for official Void, or Void glibc.
 
+`tests/vm/s3a.sh` is the first owned-boot gate. It builds one GPT disk with an ext4 root holding every generation, and one ESP disk per scenario: systemd-boot 260.5 (loader only; nothing systemd runs in the guest) plus the entry `misa-activate` published. The stock `nixos-test-driver` runs these non-NixOS guests through a test-only Dinit service speaking its backdoor protocol on `/dev/hvc0`, and the gate asserts that production generations contain neither that service nor the fixtures.
+
+- **Both stage-1 candidates boot:** OVMF, systemd-boot, the not-os adaptation or the NixOS scripted stage 1, `misa-handoff`, then Dinit. Each boot checks:
+  - `/proc/1/exe` is the pinned `dinit-0.22.0` with the manifest's SHA-256;
+  - the handoff record names the booted generation, the full check list and the GPT-verified root;
+  - the loaded tree is the manifest's adapter build, and the base services are up;
+  - the loader reports exactly the published entry and advertises boot counting.
+- **Conformance vectors on Dinit 0.22.0:** V-GR-03–05, V-RDY-01–06, V-RST-01–04 and V-SEC-03 run against fixture services. Dinit's `is-failed` reports an exit before readiness as `STOPPED`; the gate asserts Dinit's console `[FAILED]` line instead.
+- **Refusal before any init runs, each halting with no Dinit output:**
+  - a manifest edited after publication: `E_BOOT_MANIFEST_HASH`, on both stage 1s;
+  - an init that differs from its pinned digest: `E_BOOT_INIT_INVALID /boot/init/sha256`;
+  - an aarch64 init: `E_BOOT_INIT_INVALID /boot/init/elfMachine`;
+  - a hand-edited entry that selects the same disk by file-system UUID: `E_BOOT_ROOT_SELECTOR`, even though stage 1 mounted the right device.
+
+It does not cover a journal, publication crash points, boot counting fallback, rollback, live service switching, s6-rc, INIT-04 (oneshot exactly once), INIT-12 (secret credentials), sessions, LUKS, UKI or Secure Boot.
+
 ## Code map
 
 | Path | Responsibility |
@@ -173,11 +201,14 @@ The S1 VM needs local KVM and fixed-output network fetches **before** boot, for 
 | `crates/misa-image/` | Foreign locks, local admission, independent publisher qualification, OCI verification, retained storage and offline integrity checks |
 | `crates/misa-exec/` | Strict export selection, ABI preflight and attested unprivileged execution view |
 | `crates/misa-cli/` | `misa-plan` inspection and `misa` lock resolution/merging, import, qualification and launch commands |
+| `crates/misa-service/` | Service graph negotiation, the Dinit compiler and the `misa-svcrun` launcher with its readiness relay |
+| `crates/misa-init/` | `misa-handoff`: strict boot command line, selected-generation checks, root identity by content, exec of the init |
+| `crates/misa-activate/` | BLS type 1 entry rendering and B4 publication; Boot Loader Interface variables |
 | `schemas/` | Published schemas and their deterministic Python generator |
 | `fixtures/` | Synthetic records and byte-level acceptance/rejection vectors |
 | `examples/` | Real digest-pinned Debian and Void musl candidate locks; no secret keys or operator approvals |
-| `nix/`, `flake.nix`, `flake.lock` | Pinned packaging, declaration constructors, NixOS strata module and cross-language checks |
-| `tests/vm/` | S0 conformance showcase (`s0.sh`), stock-NixOS S1 and S2 acceptance VMs (`s1.sh`, `s2.sh`) and their shared fixture builders |
+| `nix/`, `flake.nix`, `flake.lock` | Pinned packaging, declaration constructors, NixOS strata module, full-host evaluator (`nix/host/`) and cross-language checks |
+| `tests/vm/` | S0 conformance showcase (`s0.sh`), stock-NixOS S1 and S2 acceptance VMs (`s1.sh`, `s2.sh`), the S3a owned-boot gate (`s3a.sh`) and their fixture builders |
 | `.github/workflows/verification.yml` | Rust, Nix and VM checks with pinned dependencies |
 
 `python3 schemas/generate.py` regenerates the schemas and synthetic record fixtures. Shared nested definitions have one generator source; generated schemas contain only reachable definitions and need no network resolution. The generator's fixture hashing is intentionally restricted to ASCII property names and safe integers; general JCS encoding belongs to the Rust implementation. `fixtures/wire.json` is the independent golden corpus and is not regenerated by that script.
@@ -187,10 +218,11 @@ Named-but-unspecified nested types in the PDF have conservative concrete layouts
 ## Next implementation sequence
 
 1. **S2 optional gates, only if wanted.** Package composition (Debian snapshot first, then a pacman/xbps composer as an independently gated manager pair) and opt-in `leased-gc` behind STR-17. Neither is required by S3; retain-all is the working storage policy.
-2. **S3: owned Linux host.** Dinit first, then s6-rc; real UEFI VM boot, generation journal and old-entry recovery, qualified service transitions and offline rollback. Do not alter the development machine's PID 1 to experiment.
-3. **Later gated work:** owned-host desktop/hardware, extended recovery/boot trust where justified, additional architectures, then separately qualified firmware targets. Firmware and fleet control are not part of this initial Linux milestone.
+2. **S3b: generation lifecycle and Dinit live switching.** The root-owned journal and publication transaction with crash campaign, Misa's own bless rename, `misa boot`/`switch`/`rollback`/`generations`, offline rollback and boot-counting fallback, DW1–DW7 with V-DIN-01–07 and INIT-15, and the remaining Dinit INIT fixtures.
+3. **S3c: s6-rc adapter and S3 exit.** `s6-linux-init` and `s6-rc` on the same graph, T1–T8 with V-SWT-01–05 and INIT-14, INIT-10, and one `tests/vm/s3.sh` over all of S3. Do not alter the development machine's PID 1 to experiment.
+4. **Later gated work:** owned-host desktop/hardware, extended recovery/boot trust where justified, additional architectures, then separately qualified firmware targets. Firmware and fleet control are not part of this initial Linux milestone.
 
-Not implemented: package composition, privileged host path opening, system-owned storage activation, host enrollment/approval, boot, init adapters, rollback, GC, automatic icon publishing, file-open field codes, firmware flashing or fleet deployment. No whole-host reproducibility, universal isolation, recovery or hardware-support claim follows from the S1 and S2 checks.
+Not implemented: package composition, privileged host path opening, system-owned storage activation, host enrollment/approval, the generation journal, rollback, live service switching, s6-rc, GC, automatic icon publishing, file-open field codes, firmware flashing or fleet deployment. No whole-host reproducibility, universal isolation, recovery or hardware-support claim follows from the S1, S2 and S3a checks.
 
 ## Architecture provenance
 

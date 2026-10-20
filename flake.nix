@@ -42,6 +42,7 @@
         in rec {
           misa = pkgs.callPackage ./nix/package.nix { };
           default = misa;
+          misa-host = pkgs.callPackage ./nix/host-package.nix { };
           strata-fixture = planLib.mkStrataPlan {
             inherit pkgs;
             name = "misa-s0-strata-fixture";
@@ -112,6 +113,12 @@
             inherit pkgs;
             misa = packages.misa;
             strataModule = self.nixosModules.strata;
+          };
+          # First owned boot: UEFI, borrowed stage 1, misa-handoff, Dinit as PID 1.
+          s3a = import ./tests/vm/s3a.nix {
+            inherit pkgs planLib;
+            misa = packages.misa;
+            misaHost = packages.misa-host;
           };
         });
 
